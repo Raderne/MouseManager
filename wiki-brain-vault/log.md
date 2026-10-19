@@ -17,3 +17,6 @@ Touched: <comma-separated wiki pages, or "none">
 
 ## [2026-10-19 13:23] session | Bootstrap wiki-brain for N230 Control
 Touched: N230 Control, N230 Hardware, Monitor App, Windows Input Backend, Linux Input Backend, Tauri Rewrite, Stack Decision, DPI Measurement, Battery Reading, Design System, CLAUDE.md Rules, Wiki-Brain Setup, index
+
+## [2026-10-19 14:00] session | Phase 0: toolchain, HID scan, scaling spike
+Touched: N230 Hardware, DPI Measurement, Battery Reading

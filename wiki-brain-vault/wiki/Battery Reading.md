@@ -6,6 +6,12 @@
 
 Feature report 6 on collection `0xFF02` ([[N230 Hardware]]) read `06 00 02 00 EA 64 87 79` on 2026-10-19. Byte 5 is **`0x64` = 100**, which may be the battery %. The mouse was likely charged at the time.
 
+## Progress (2026-10-19)
+
+- The mouse has a **rechargeable battery** (USB), so test by comparing while charging and as it runs down.
+- `MouseManager.exe --hid` dumps every report and appends report 6 to `%APPDATA%\MouseManager\report6.log`. Run it again later to build a history.
+- There are two more candidates besides report 6: `0xFF01` input report 2 and `0xFFBC` input report 4 (all zeros so far). See [[N230 Hardware]].
+
 ## Spike 0a (in `App/STEPS.md`)
 
 1. Read report 6 at several battery levels (on Windows through HID, on Linux through `/dev/hidraw*`). Check whether byte 5 drops.

@@ -17,6 +17,21 @@ The N230's DPI button sends nothing ([[N230 Hardware]]), so the PC can't read or
 
 1424, 1423 (both reliable), then 795. The 795 is either a real DPI press (about 800) or a short slide; not confirmed.
 
+## Spike 0b result (2026-10-19): Windows scaling works ✅
+
+Run with `MouseManager.exe --scale <factor> <seconds>` (temporary spike code in `Monitor/Remapper.cs`; it ends by itself).
+
+| Measure | Result |
+|---|---|
+| Time spent in the hook per move | **10–26 µs average**, 1.4 ms worst case (Windows removes a hook after about 300 ms) |
+| Raw counts → scaled move re-sent | **54–85 µs average**, 1.9 ms worst case |
+| CPU | under 1% while moving |
+| Pointer px ÷ sensor counts | ×1: **1.0–1.4** · ×0.25: **0.11–0.25** |
+
+- The pointer moved far less at ×0.25, so it works. The drop is bigger than 4× because **"Enhance pointer precision" is on** (`HKCU\Control Panel\Mouse\MouseSpeed = 1`): slower input gets less speed-up. The real app should either accept that (it's how a lower-DPI mouse would behave) or offer a "match exactly" option that sends absolute moves. Decide in Phase 6.
+- Feel: at ×0.5 the user didn't notice a change. Suspected cause: the moves happened in the first seconds while reading the instructions. Use ×0.25 or the measured ratio, not feel, to confirm.
+- The hook counts injected moves as well. Swallowed ≈ the N230's own moves; the rest are our re-sent moves (and any other mouse).
+
 ## Software DPI scaling (planned)
 
 The target stages (Native / 400 / 800 / 1200 / 1600) scale the N230's movement by `target / measured`, for that device only.

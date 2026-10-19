@@ -36,6 +36,7 @@ static class Native
     [DllImport("hid.dll")] static extern bool HidD_FreePreparsedData(IntPtr data);
     [DllImport("hid.dll")] static extern int HidP_GetCaps(IntPtr data, short[] caps);
     [DllImport("hid.dll")] static extern bool HidD_GetFeature(SafeFileHandle h, byte[] buf, int len);
+    [DllImport("hid.dll")] static extern bool HidD_GetInputReport(SafeFileHandle h, byte[] buf, int len);
     [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Get_Device_Interface_List_Size(out int len, ref Guid cls, string? id, int flags);
     [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)] static extern int CM_Get_Device_Interface_List(ref Guid cls, string? id, char[] buf, int len, int flags);
 
@@ -79,22 +80,28 @@ static class Native
         return new string(buf).Split('\0', StringSplitOptions.RemoveEmptyEntries);
     }
 
-    // Opens (without read/write access) the first matching HID collection that has feature reports: the mouse's settings channel.
-    public static (SafeFileHandle Handle, int Length)? OpenFeatureCollection(Func<string, bool> match)
+    // Every matching HID collection, opened without read/write access (enough for caps and feature reports), with its HIDP_CAPS sizes.
+    public static IEnumerable<(string Path, SafeFileHandle Handle, ushort Page, ushort Usage, int In, int Out, int Feature)> OpenHidCollections(Func<string, bool> match)
     {
         foreach (var path in HidInterfacePaths().Where(match))
         {
             var h = CreateFile(path, 0, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
             if (h.IsInvalid) continue;
-            int len = 0;
-            if (HidD_GetPreparsedData(h, out var pp))
-            {
-                var caps = new short[32];
-                if (HidP_GetCaps(pp, caps) == 0x00110000) len = caps[4]; // FeatureReportByteLength
-                HidD_FreePreparsedData(pp);
-            }
-            if (len > 0) return (h, len);
-            h.Dispose();
+            var caps = new short[32]; // Usage, UsagePage, InputReportByteLength, OutputReportByteLength, FeatureReportByteLength, ...
+            bool ok = HidD_GetPreparsedData(h, out var pp);
+            if (ok) { ok = HidP_GetCaps(pp, caps) == 0x00110000; HidD_FreePreparsedData(pp); }
+            if (!ok) { h.Dispose(); continue; }
+            yield return (path, h, (ushort)caps[1], (ushort)caps[0], caps[2], caps[3], caps[4]);
+        }
+    }
+
+    // The first matching collection that has feature reports: the mouse's settings channel.
+    public static (SafeFileHandle Handle, int Length)? OpenFeatureCollection(Func<string, bool> match)
+    {
+        foreach (var c in OpenHidCollections(match))
+        {
+            if (c.Feature > 0) return (c.Handle, c.Feature);
+            c.Handle.Dispose();
         }
         return null;
     }
@@ -105,6 +112,15 @@ static class Native
         buf[0] = reportId;
         return HidD_GetFeature(h, buf, len) ? buf : null;
     }
+
+    public static byte[]? GetInputReport(SafeFileHandle h, byte reportId, int len)
+    {
+        var buf = new byte[len];
+        buf[0] = reportId;
+        return HidD_GetInputReport(h, buf, len) ? buf : null;
+    }
+
+    public static void SendMove(int dx, int dy) => Send(new INPUT { Type = 0, U = new INPUTUNION { Mi = new MOUSEINPUT { Dx = dx, Dy = dy, Flags = 1 } } }); // MOUSEEVENTF_MOVE, relative
 
     public static int InputSize => Marshal.SizeOf<INPUT>();
 

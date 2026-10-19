@@ -6,7 +6,7 @@ sealed class Config
     public List<string> Devices { get; set; } = [RawInputLogger.N230];
     public Dictionary<string, string> Buttons { get; set; } = new() { ["Middle"] = "Default", ["Back"] = "Default", ["Forward"] = "Default" };
 
-    static readonly string FilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MouseManager", "config.json");
+    public static readonly string FilePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "MouseManager", "config.json");
     static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
 
     public static Config Load()

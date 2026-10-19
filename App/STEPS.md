@@ -81,7 +81,15 @@ Devices are stored as VID/PID, not Windows path text, so one config works on bot
   - Confirm X1 = `BTN_SIDE` and X2 = `BTN_EXTRA`.
   - Note which nodes carry the consumer and system controls, so they're left alone.
 
-**Done when:** the three results are written in `CLAUDE.md` → "Hardware facts" (yes or no for battery and scaling, plus the Linux node layout).
+**Done when:** the three results are written in the wiki (`N230 Hardware`, `Battery Reading`, `DPI Measurement`): yes or no for battery and scaling, plus the Linux node layout.
+
+**Status (2026-10-19):**
+- ✅ Windows toolchain: Rust 1.99.1 (MSVC), Node 24, .NET 10, WebView2, VS Build Tools 2022.
+- ✅ 0b: scaling works (about 15 µs per hook call, under 1% CPU).
+- ⏳ 0a: in progress.
+- ⏳ 0c: needs a Linux machine.
+
+The spike tools are `Monitor\…\MouseManager.exe --hid` and `--scale <factor> <seconds>`.
 
 ## Phase 1: Tauri skeleton
 
