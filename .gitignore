@@ -1,0 +1,31 @@
+# --- .NET (Monitor/) ---
+bin/
+obj/
+*.user
+.vs/
+
+# --- Rust / Tauri (App/src-tauri/) ---
+target/
+App/src-tauri/gen/schemas/
+
+# --- Node (App/) ---
+node_modules/
+dist/
+npm-debug.log*
+
+# --- Wiki vault (Obsidian) ---
+wiki-brain-vault/.obsidian/workspace*.json
+wiki-brain-vault/graphify-out/
+
+# --- Claude Code: per-user settings ---
+.claude/settings.local.json
+
+# --- Secrets ---
+.env
+.env.*
+
+# --- OS / editors ---
+Thumbs.db
+desktop.ini
+.DS_Store
+*.swp
