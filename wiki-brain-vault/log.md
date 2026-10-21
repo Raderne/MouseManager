@@ -35,3 +35,6 @@ Touched: Windows Input Backend
 
 ## [2026-10-21 22:19] session | Phase 5 Buttons screen
 Touched: Tauri Rewrite
+
+## [2026-10-21 22:27] session | Phase 6 Performance screen and DPI
+Touched: DPI Measurement, Design System, Tauri Rewrite

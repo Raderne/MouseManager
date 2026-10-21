@@ -146,7 +146,7 @@ button { font: inherit; cursor: pointer; }
 }
 
 /* Form fields */
-select, input[type="text"] {
+select, input[type="text"], input[type="number"] {
   min-height: 44px;
   padding: 0 14px;
   border: 1px solid var(--line);
@@ -195,6 +195,23 @@ input[type="text"] { font-family: "JetBrains Mono", monospace; user-select: text
 .map-row .status:empty { display: none; }
 .map-row .status.error { color: var(--text); font-weight: 600; }
 .map-row .status.error::before { content: "✕ "; color: var(--accent); }
+
+/* Performance screen */
+.perf { flex-direction: row; flex-wrap: wrap; align-items: center; gap: 24px; }
+.dial { position: relative; flex: 0 0 168px; height: 168px; }
+.dial .gauge { --gauge-w: 12; }
+.dial-text { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.dial-text .mono { font-size: 32px; font-weight: 700; }
+.dial-text .muted { font-size: 12px; }
+.perf-main { flex: 1 1 280px; display: flex; flex-direction: column; gap: 12px; }
+.perf-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 12px; }
+.perf-head .mono { color: var(--text); }
+.stages { display: flex; flex-wrap: wrap; gap: 6px; }
+.stage:disabled { opacity: 0.45; cursor: not-allowed; }
+.measure { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.measure input { width: 76px; margin: 0 4px; }
+.btn[aria-pressed="true"] { background: var(--panel2); color: var(--text); outline: 2px solid var(--accent); }
+#measure-status:empty { display: none; }
 
 /* Theme picker: each card carries its own data-theme, so it shows its own colors. */
 .themes {

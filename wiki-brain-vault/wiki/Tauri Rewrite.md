@@ -74,6 +74,8 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
 
   The real-click checks are pending.
 
+- 2026-10-21: **Phase 6 Performance screen** built: dial, stages, and a two-slide DPI meter ([[DPI Measurement]] → As built). The real-slide checks are pending.
+
 ## Commands (Rust ↔ UI)
 
 | Command | What |
@@ -81,8 +83,13 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
 | `get_config` | The whole config (the UI reads `buttons`) |
 | `set_mapping(button, mapping)` | `X1`/`X2`. Applies through `Handle::apply` first. On `Err` (the parser's message), nothing changes. Then saves `config.json` |
 | `set_theme(theme)` | Saves `config.theme` (the UI has already recolored) |
+| `set_dpi(measured, target)` | Saves `measuredDpi` and `targetDpi` (`null` = Native) and applies `Config::scale()` = target ÷ measured |
 
 Backend events arrive in JS on the `"n230"` channel (`listen("n230", …)`).
+
+JS checks: `npm run check` runs `App/tests/*.mjs` with plain `node:assert` (no framework). It's for pure JS modules such as `src/dpi.js`.
+
+**Screenshots while the user is working:** capture only the app window with `PrintWindow` (it works even when the window is covered). Screen capture with `CopyFromScreen` grabs whatever is on top, which can be the user's other apps.
 
 **Testing tip:** WebView2 exposes the page to UI Automation, so a PowerShell script (`System.Windows.Automation`) can switch tabs, pick `<select>` options and type into fields without moving the user's mouse. Real N230 clicks can't be faked: `SendInput` is marked injected and has no device handle, so the backend ignores it by design.
 

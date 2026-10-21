@@ -49,6 +49,7 @@
   - `.chip`
   - `.btn`
   - `.gauge`: an SVG ring. Hide `.value` while the value is unknown, or the round cap draws a dot.
+- **Gotcha:** SVG elements have no `.hidden` property. `circle.hidden = false` silently does nothing, so use `toggleAttribute("hidden", …)` (this bit the DPI dial).
 - **Gotcha:** an author `display` rule (e.g. `.card { display:flex }`) beats the `hidden` attribute. `styles.css` has `[hidden] { display:none !important }`.
 
 Related: [[Tauri Rewrite]] (Phase 2), [[DPI Measurement]].

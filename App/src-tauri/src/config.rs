@@ -35,6 +35,10 @@ pub struct Config {
     pub theme: String,
     pub start_minimized: bool,
     pub low_battery_warning: bool,
+    /// Last DPI measured on the Performance screen; `None` until measured.
+    pub measured_dpi: Option<f64>,
+    /// The chosen stage; `None` = Native (no scaling).
+    pub target_dpi: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -67,11 +71,22 @@ impl Default for Config {
             theme: THEMES[0].0.into(),
             start_minimized: true,
             low_battery_warning: true,
+            measured_dpi: None,
+            target_dpi: None,
         }
     }
 }
 
 impl Config {
+    /// Movement scale for the backend: target ÷ measured, 1.0 when either is unknown.
+    /// Clamped so a hand-edited config can't make the pointer unusable.
+    pub fn scale(&self) -> f64 {
+        match (self.measured_dpi, self.target_dpi) {
+            (Some(m), Some(t)) if m.is_finite() && m > 0.0 => (t as f64 / m).clamp(0.1, 10.0),
+            _ => 1.0,
+        }
+    }
+
     /// A missing or unreadable file gives the defaults; missing keys get their defaults.
     pub fn load(path: &Path) -> Self {
         let mut c: Self = fs::read_to_string(path)
@@ -149,6 +164,16 @@ mod tests {
     }
 
     #[test]
+    fn dpi_scale() {
+        let c = |m, t| Config { measured_dpi: m, target_dpi: t, ..Config::default() }.scale();
+        assert!((c(Some(1424.0), Some(800)) - 0.5618).abs() < 1e-3, "800 stage ≈ 56%");
+        assert_eq!(c(None, Some(800)), 1.0, "not measured yet");
+        assert_eq!(c(Some(1424.0), None), 1.0, "Native");
+        assert_eq!(c(Some(0.0), Some(800)), 1.0);
+        assert_eq!(c(Some(10.0), Some(1600)), 10.0, "clamped");
+    }
+
+    #[test]
     fn config_round_trip_and_defaults() {
         let path = std::env::temp_dir().join(format!("n230-config-test-{}.json", std::process::id()));
         let c = Config {
@@ -157,6 +182,8 @@ mod tests {
             theme: "ember".into(),
             start_minimized: false,
             low_battery_warning: false,
+            measured_dpi: Some(1424.0),
+            target_dpi: Some(800),
         };
         c.save(&path).unwrap();
         assert_eq!(Config::load(&path), c);

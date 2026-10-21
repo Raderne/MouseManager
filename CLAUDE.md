@@ -38,7 +38,7 @@ For the rewrite (once Phase 1 exists), from `App/`: `npm run tauri dev` runs the
 - **No fake values in the UI:** battery and DPI show "—" when unknown.
 - **Colors come only from the theme CSS variables** (5 themes, see the wiki's Design System page).
 - **Follow `App/STEPS.md` phase by phase.** A phase's "Done when" check must pass before the next phase starts.
-- **Tests:** there's no test framework. Use `SelfTest()` in `Monitor/Program.cs` and `#[cfg(test)]` with `cargo test` in `App/`. Non-trivial logic gets a check.
+- **Tests:** there's no test framework. Use `SelfTest()` in `Monitor/Program.cs`, `#[cfg(test)]` with `cargo test` in `App/`, and `npm run check` (plain `node:assert` scripts in `App/tests/`) for pure JS modules. Non-trivial logic gets a check.
 
 ## Wiki-Brain: knowledge base (READ FIRST, KEEP UPDATED)
 

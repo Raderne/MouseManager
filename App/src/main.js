@@ -1,4 +1,8 @@
+import { Meter } from "./dpi.js";
+
 const { invoke } = window.__TAURI__.core;
+const { listen } = window.__TAURI__.event;
+const $ = (id) => document.getElementById(id);
 
 // Pill tabs: show the clicked tab's section, hide the rest. No router.
 const tabs = document.querySelectorAll('[role="tab"]');
@@ -94,9 +98,81 @@ function setupRow(row, current) {
   row.addEventListener("focusin", () => selectButton(button));
 }
 
+// Performance screen. Rust turns measured + target into the movement scale.
+const DIAL_MAX = 1600;
+const DIAL_C = 2 * Math.PI * 72;
+let measured = null; // confirmed hardware DPI
+let target = null; // chosen stage, null = Native
+let meter = new Meter();
+let measuring = false;
+
+function renderDpi() {
+  const effective = measured && target ? target : measured;
+  $("dial-value").textContent = effective ? Math.round(effective) : "—";
+  const ring = $("dial-ring");
+  ring.toggleAttribute("hidden", !effective); // SVG elements have no .hidden property
+  ring.setAttribute("stroke-dasharray", `${(DIAL_C * Math.min(effective ?? 0, DIAL_MAX)) / DIAL_MAX} ${DIAL_C}`);
+  $("hw-dpi").textContent = measured ? Math.round(measured) : "—";
+  for (const b of document.querySelectorAll(".stage")) {
+    b.disabled = measured === null;
+    b.setAttribute("aria-pressed", String((Number(b.dataset.dpi) || null) === target));
+  }
+  $("stage-hint").hidden = measured !== null;
+  $("recent").textContent = meter.recent.length ? meter.recent.map(Math.round).join(" · ") : "—";
+}
+
+const saveDpi = () =>
+  invoke("set_dpi", { measured, target }).catch((e) => ($("measure-status").textContent = String(e)));
+const slideCm = () => Math.max(1, Number($("cm").value) || 10);
+
+for (const b of document.querySelectorAll(".stage")) {
+  b.addEventListener("click", () => {
+    target = Number(b.dataset.dpi) || null;
+    saveDpi();
+    renderDpi();
+  });
+}
+
+$("measure").addEventListener("click", () => {
+  measuring = !measuring;
+  meter.reset();
+  $("measure").setAttribute("aria-pressed", measuring);
+  $("measure").textContent = measuring ? "Stop measuring" : "Measure DPI";
+  $("measure-status").textContent = measuring
+    ? `Slide the N230 ${slideCm()} cm in a straight line and stop. Do it twice.`
+    : "";
+});
+
+listen("n230", ({ payload: ev }) => {
+  if (measuring && ev.type === "move" && ev.target) meter.move(ev.dx, ev.dy, performance.now());
+});
+
+setInterval(() => {
+  if (!measuring) return;
+  const r = meter.tick(performance.now(), slideCm());
+  if (!r) return;
+  const status = $("measure-status");
+  if (r.ignored) {
+    status.textContent = "Too short, ignored. Slide the full distance.";
+  } else if (!r.confirmed) {
+    status.textContent = `Slide: ${Math.round(r.dpi)} DPI. Slide again to confirm.`;
+  } else {
+    status.textContent = r.changed
+      ? `DPI changed: now ${Math.round(r.confirmed)} (was ${Math.round(measured)}).`
+      : `Measured ${Math.round(r.confirmed)} DPI.`;
+    measured = r.confirmed;
+    saveDpi(); // a new hardware DPI re-scales the current stage
+  }
+  renderDpi();
+}, 100);
+
 invoke("get_config").then((config) => {
   for (const row of document.querySelectorAll(".map-row")) setupRow(row, config.buttons[row.dataset.button]);
   selectButton("X2");
+  measured = config.measuredDpi;
+  target = config.targetDpi;
+  meter = new Meter(measured);
+  renderDpi();
 });
 
 // Theme picker. Rust set data-theme before first paint; recolor at once, then save.

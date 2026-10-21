@@ -45,6 +45,19 @@ fn set_mapping(button: String, mapping: String, state: State<AppState>) -> Resul
     config.save(&state.path).map_err(|e| format!("Applied, but couldn't save the config: {e}"))
 }
 
+/// Saves the measured DPI and the chosen stage (`None` = Native) and applies target ÷ measured.
+#[tauri::command]
+fn set_dpi(measured: Option<f64>, target: Option<u32>, state: State<AppState>) -> Result<(), String> {
+    if measured.is_some_and(|m| !(m.is_finite() && m > 0.0)) {
+        return Err("measured DPI must be a positive number".into());
+    }
+    let mut config = state.config.lock().unwrap();
+    config.measured_dpi = measured;
+    config.target_dpi = target;
+    state.backend.set_scale(config.scale());
+    config.save(&state.path).map_err(|e| format!("Applied, but couldn't save the config: {e}"))
+}
+
 /// `--log <seconds>`: print what every mouse sends, tagged by device, like the C# app's `--log`.
 /// Uses the default device list and remaps nothing. Debug builds only have a console.
 pub fn log(seconds: u64) {
@@ -106,7 +119,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![set_theme, get_config, set_mapping])
+        .invoke_handler(tauri::generate_handler![set_theme, get_config, set_mapping, set_dpi])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");
             let config = Config::load(&path);
@@ -121,6 +134,7 @@ pub fn run() {
             // Backend events go to the UI on one channel, "n230", as {"type": …, …}.
             let (tx, rx) = mpsc::channel();
             let backend = platform::start(config.clone(), tx);
+            backend.set_scale(config.scale());
             let handle = app.handle().clone();
             thread::spawn(move || {
                 for ev in rx {

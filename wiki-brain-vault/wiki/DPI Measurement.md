@@ -39,4 +39,14 @@ The target stages (Native / 400 / 800 / 1200 / 1600) scale the N230's movement b
 - **Windows:** swallow `WM_MOUSEMOVE` from the N230 in the hook and re-inject the scaled movement, carrying the fractional remainder over. Latency and CPU use at 1000 Hz still need measuring: **spike 0b** ([[Windows Input Backend]]).
 - If the measured DPI changes (someone pressed the button on the mouse), re-send the scale.
 
+## As built in the rewrite (Phase 6, 2026-10-21)
+
+- **Meter:** `App/src/dpi.js` (pure, checked by `npm run check`) reads the `move` events where `target` is true. Those are raw counts, so the meter reads the hardware DPI even while scaling is on.
+  - A slide ends after 400 ms still.
+  - Net displacement is used.
+  - Slides under **120 DPI** are ignored as nudges (this replaced "30% of the last DPI", which could lock out a real large drop).
+- **Two-slide confirmation:** a reading counts only when **two slides in a row agree within 3%**; the saved value is their average. This drops stray moves, like moving the mouse to the ruler after clicking "Measure DPI". A confirmed reading more than **15%** off the previous one shows "DPI changed".
+- **Stages:** the stage and the measured DPI are saved (`measuredDpi`, `targetDpi`). Rust's `Config::scale()` = target ÷ measured, clamped to 0.1–10, and is applied at startup. A new measurement re-applies the scale.
+- **Pointer precision:** accepted as is. With "Enhance pointer precision" on, a scaled-down N230 behaves like a lower-DPI mouse, so expect less than the exact ratio.
+
 Related: [[Tauri Rewrite]] (Phase 6), [[Design System]] (dial).

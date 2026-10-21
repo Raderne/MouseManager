@@ -195,6 +195,15 @@ Port `Remapper.cs`, `Native.cs` and `RawInputLogger.cs` to `platform/windows.rs`
 
 **Done when:** two 10 cm slides agree within 3%, and the 800 stage moves the pointer about 56% as far as Native.
 
+**Status (2026-10-21):** built; the real-slide checks are waiting on the user.
+- ✅ `npm run check` (meter logic, `tests/dpi.mjs`) and `cargo test` (`Config::scale`) pass.
+- ✅ Through UI Automation, with a seeded 1424 DPI: 800 → `targetDpi: 800` and the dial shows 800; Native → cleared.
+- Changed from the plan:
+  - A reading is **confirmed only when two slides in a row agree within 3%**, and their average is saved. This drops stray moves, like moving to the ruler's start after clicking "Measure".
+  - Nudges are filtered by a fixed **120 DPI floor** instead of "30% of the last DPI". It catches the same nudge, but can't lock out a real big drop.
+  - `measuredDpi` and `targetDpi` are saved in the config. Rust computes `scale = target ÷ measured` (clamped 0.1–10) in `Config::scale()` and applies it at startup. The UI calls `set_dpi(measured, target)`, not `set_scale` directly.
+- "Enhance pointer precision" is on, so the 800 stage may move a bit less than 56%: acceleration treats slower input like a lower-DPI mouse would. Accepted for now.
+
 ## Phase 7: Battery
 
 Only if 0a said yes:
