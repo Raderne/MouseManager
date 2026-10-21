@@ -161,6 +161,12 @@ Port `Remapper.cs`, `Native.cs` and `RawInputLogger.cs` to `platform/windows.rs`
 
 **Done when:** the event stream matches `../Monitor`'s `--log` output, X2 → `Ctrl+Shift+T` works, and clicks from a second mouse are never changed.
 
+**Status (2026-10-21):** code done; the hands-on checks are waiting on the user.
+- `platform/windows.rs` is in place and `cargo test` passes 16 tests, including the ported checks for the INPUT size and the raw X1 decode.
+- `n230-control.exe --log <s>` prints events the way the C# `--log` does.
+- Uses `windows-sys` (the raw-FFI flavour of the `windows` crate), which is already in the dependency tree.
+- Only the mouse usage page (0x01/0x02) is registered for Raw Input. The C# `--log` also listened to the consumer and vendor pages; nothing in the event list needs them.
+
 ## Phase 5: Buttons screen
 
 - The mouse diagram as inline SVG. The selected side button is highlighted with `--accent`.

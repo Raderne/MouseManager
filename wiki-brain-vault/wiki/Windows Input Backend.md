@@ -25,4 +25,20 @@ How to remap the buttons of **one** mouse on Windows. It's implemented in `Monit
 
 One thread owns the window, the hook and a `GetMessage` loop. The hook is an `extern "system" fn` with its state in `thread_local!`. Commands arrive over a channel, and `PostMessage(WM_APP)` wakes the thread.
 
+### As built (`App/src-tauri/src/platform/windows.rs`, 2026-10-21)
+
+- **Crate:** `windows-sys` 0.61, which Tauri already depends on.
+- **Re-entrancy:** low-level hook calls are delivered as *sent messages*, so the `PeekMessage` that drains `WM_INPUT` inside the hook can call the hook again. The state is a `RefCell`, borrowed only briefly via `with()` (which uses `try_borrow_mut`) and never across `PeekMessage` or `SendInput`. A panic inside the `extern "system"` hook would abort the process, so nothing in there unwraps.
+- **Device match:** VID/PID from the config.
+  - USB paths contain `VID_3554&PID_FC01`.
+  - Bluetooth paths contain `_VID&0002046d_PID&b01a` (classic) or `_VID&02046d_PID&b01a` (LE).
+  - Entries that aren't 4 hex digits match nothing, so a blank entry can't remap every mouse.
+- **Actions:**
+  - Key combos go out as **one** `SendInput` call (down in order, up in reverse).
+  - `run:` uses `ShellExecuteW` on its own thread, so a slow launch can't stall the hook thread and get the hook removed.
+- **Hook liveness:** every second, compare the non-injected events Raw Input saw with those the hook saw. If Raw Input saw ≥ 10 and the hook saw 0, Windows removed the hook: re-install it and send an `error` event.
+- **Movement:** summed per 50 ms timer tick into `move` events (the N230 always; other devices only with "show all devices"). With a scale ≠ 1, N230 `WM_MOUSEMOVE` is swallowed and re-sent scaled, carrying the fraction over, as in spike 0b ([[DPI Measurement]]).
+- **Raw Input pages:** only the mouse page (0x01/0x02) is registered. The C# `--log` also listened to the consumer and vendor pages.
+- **Debug tool:** `n230-control.exe --log <seconds>` prints button events (all devices) and N230 moves.
+
 Related: [[Linux Input Backend]], [[N230 Hardware]].

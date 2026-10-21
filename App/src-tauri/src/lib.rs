@@ -4,17 +4,49 @@ pub mod event;
 pub mod platform;
 
 use config::Config;
-use std::{path::PathBuf, sync::Mutex};
+use event::Event;
+use std::{
+    path::PathBuf,
+    sync::{mpsc, Mutex},
+    thread,
+    time::{Duration, Instant},
+};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
     window::Color,
-    AppHandle, Manager, State, WebviewWindowBuilder, WindowEvent,
+    AppHandle, Emitter, Manager, State, WebviewWindowBuilder, WindowEvent,
 };
 
 struct AppState {
     config: Mutex<Config>,
     path: PathBuf,
+    #[allow(dead_code)] // Phases 5, 6 and 8 add the commands that use it.
+    backend: platform::Handle,
+}
+
+/// `--log <seconds>`: print what every mouse sends, tagged by device, like the C# app's `--log`.
+/// Uses the default device list and remaps nothing. Debug builds only have a console.
+pub fn log(seconds: u64) {
+    let (tx, rx) = mpsc::channel();
+    let backend = platform::start(Config { buttons: Default::default(), ..Config::default() }, tx);
+    backend.set_all_devices(true);
+    println!("Logging for {seconds}s - press each button a few times, slowly.");
+    let start = Instant::now();
+    let end = start + Duration::from_secs(seconds);
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        let Ok(ev) = rx.recv_timeout(left) else { break };
+        let t = start.elapsed().as_secs_f64();
+        match ev {
+            Event::Button { device, target, button, down } => {
+                let tag = if target { "N230 " } else { "other" };
+                println!("{t:8.3} [{tag}] {button}-{}  {device}", if down { "down" } else { "up" });
+            }
+            Event::Move { target: true, dx, dy } => println!("{t:8.3} [N230 ] move {dx:+} {dy:+}"),
+            Event::Move { .. } => {}
+            other => println!("{t:8.3} {other:?}"),
+        }
+    }
 }
 
 #[tauri::command]
@@ -65,7 +97,17 @@ pub fn run() {
                 .background_color(Color(r, g, b, 255))
                 .initialization_script(&theme_script(&config.theme))
                 .build()?;
-            app.manage(AppState { config: Mutex::new(config), path });
+
+            // Backend events go to the UI on one channel, "n230", as {"type": …, …}.
+            let (tx, rx) = mpsc::channel();
+            let backend = platform::start(config.clone(), tx);
+            let handle = app.handle().clone();
+            thread::spawn(move || {
+                for ev in rx {
+                    let _ = handle.emit("n230", ev);
+                }
+            });
+            app.manage(AppState { config: Mutex::new(config), path, backend });
 
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;

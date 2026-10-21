@@ -9,7 +9,14 @@
 //! }
 //! ```
 //!
-//! Phase 4 adds `windows.rs` and Phase 9 `linux.rs`; until then every OS uses the stub.
+//! Phase 9 replaces the stub with `linux.rs`.
 
+#[cfg(windows)]
+mod windows;
+#[cfg(windows)]
+pub use windows::{start, Handle};
+
+#[cfg(not(windows))]
 mod stub;
+#[cfg(not(windows))]
 pub use stub::{start, Handle};
