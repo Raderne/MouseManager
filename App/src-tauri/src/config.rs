@@ -25,16 +25,49 @@ fn hex_rgb(hex: &str) -> (u8, u8, u8) {
     (v(1), v(3), v(5))
 }
 
-// ponytail: only `theme` so far; Phase 3 adds devices, buttons and the flags.
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-#[serde(default)]
+/// `config.json` in Tauri's `app_config_dir()`. Only Rust reads and writes it.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default, rename_all = "camelCase")]
 pub struct Config {
+    /// Devices to remap, as USB VID/PID (hex), so one file works on Windows and Linux.
+    pub devices: Vec<Device>,
+    pub buttons: Buttons,
     pub theme: String,
+    pub start_minimized: bool,
+    pub low_battery_warning: bool,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub struct Device {
+    pub vid: String,
+    pub pid: String,
+}
+
+/// Mapping text per side button, parsed by `action::parse_buttons`.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(default)]
+pub struct Buttons {
+    #[serde(rename = "X1")]
+    pub x1: String,
+    #[serde(rename = "X2")]
+    pub x2: String,
+}
+
+impl Default for Buttons {
+    fn default() -> Self {
+        Self { x1: "Default".into(), x2: "Default".into() }
+    }
 }
 
 impl Default for Config {
     fn default() -> Self {
-        Self { theme: THEMES[0].0.into() }
+        Self {
+            devices: vec![Device { vid: "3554".into(), pid: "FC01".into() }], // the 2.4G receiver
+            buttons: Buttons::default(),
+            theme: THEMES[0].0.into(),
+            start_minimized: true,
+            low_battery_warning: true,
+        }
     }
 }
 
@@ -118,12 +151,29 @@ mod tests {
     #[test]
     fn config_round_trip_and_defaults() {
         let path = std::env::temp_dir().join(format!("n230-config-test-{}.json", std::process::id()));
-        let c = Config { theme: "ember".into() };
+        let c = Config {
+            devices: vec![Device { vid: "3554".into(), pid: "FC01".into() }, Device { vid: "17EF".into(), pid: "6060".into() }],
+            buttons: Buttons { x1: "Back".into(), x2: "Ctrl+Shift+T".into() },
+            theme: "ember".into(),
+            start_minimized: false,
+            low_battery_warning: false,
+        };
         c.save(&path).unwrap();
         assert_eq!(Config::load(&path), c);
 
+        // The file format from STEPS.md.
+        let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(json["buttons"]["X2"], "Ctrl+Shift+T");
+        assert_eq!(json["devices"][0]["vid"], "3554");
+        assert_eq!(json["startMinimized"], false);
+        assert_eq!(json["lowBatteryWarning"], false);
+
         fs::write(&path, "{}").unwrap();
-        assert_eq!(Config::load(&path).theme, "pulse", "missing key gets default");
+        assert_eq!(Config::load(&path), Config::default(), "missing keys get defaults");
+        fs::write(&path, r#"{"buttons":{"X2":"VolumeUp"},"startMinimized":false}"#).unwrap();
+        let partial = Config::load(&path);
+        assert_eq!((partial.buttons.x1.as_str(), partial.buttons.x2.as_str()), ("Default", "VolumeUp"));
+        assert!(!partial.start_minimized && partial.low_battery_warning);
         fs::write(&path, r#"{"theme":"nope"}"#).unwrap();
         assert_eq!(Config::load(&path).theme, "pulse", "unknown theme falls back");
         fs::write(&path, "not json").unwrap();

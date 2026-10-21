@@ -26,3 +26,6 @@ Touched: Tauri Rewrite
 
 ## [2026-10-21 21:43] session | Phase 2 themes and design tokens
 Touched: Design System, Tauri Rewrite
+
+## [2026-10-21 21:47] session | Phase 3 shared Rust core
+Touched: Tauri Rewrite, Monitor App

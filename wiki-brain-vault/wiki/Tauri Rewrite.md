@@ -64,6 +64,26 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
 - 2026-10-19: plan written; no code yet. Next: Phase 0.
 - 2026-10-21: **Phase 1 skeleton** done on Windows: `create-tauri-app` vanilla template, then `src-tauri/src/lib.rs` (tray Open/Exit, close hides to tray, `tauri-plugin-single-instance` focuses the first window, `tauri-plugin-autostart` registered) and `src/` (Pulse header, pill tabs, empty sections). Started while Phase 0 spikes 0a/0c were still open, by the user's choice. Linux check still pending.
 - 2026-10-21: **Phase 2 themes** done on Windows: 5 themes, bundled fonts, component styles, and a Settings theme picker that saves through the `set_theme` command. `config.rs` was started early (theme only). Details: [[Design System]] → Implementation. Linux side-by-side still pending.
+- 2026-10-21: **Phase 3 shared core** done on Windows (11 `cargo test` checks): `config.rs` (full config), `action.rs`, `event.rs`, and `platform/` with a stub backend. Linux `cargo test` still pending.
+
+## Rust core (Phase 3)
+
+- **`action.rs`** is the only mapping parser. `parse(text) -> Result<Action, String>`, where `Action` is `PassThrough | Disabled | Mouse(Btn) | Keys(Vec<Key>) | Run(String)`.
+  - `parse_buttons` prefixes the button to the error: `X2: unknown key 'Nope'`.
+  - Rules carried over from [[Monitor App]]:
+    - Names ignore case.
+    - A whole mapping is checked against mouse names before key names (`Back` = mouse).
+    - Inside a combo, `Back` is Backspace (`Ctrl+Back`), as in the C# app.
+- **`Key` is OS-neutral:**
+  - `Letter`, `Digit`, `F(1..=24)` and `NumPad(0..=9)` carry a value; the rest are named variants.
+  - The parser accepts both friendly names (`Esc`, `Minus`) and the old WinForms `Keys` names (`Return`, `Prior`, `OemMinus`, …), so old mapping text keeps working.
+  - Each backend maps `Key` with an exhaustive `match`, so a new key can't be forgotten on one OS.
+- **Config differs from the C# app:**
+  - Buttons are keyed `X1`/`X2` (C#: `Middle`/`Back`/`Forward`).
+  - Devices are VID/PID objects (C#: path substrings).
+  - As in C#, saving drops keys the struct doesn't know.
+- **`event.rs`:** all events go to the UI on one channel as `{"type":"button"|"move"|"battery"|"settings"|"device"|"error", …}`. Battery `null` = unknown.
+- **`platform/`:** `stub.rs` serves every OS for now; its `apply` only validates. Phase 4 adds `windows.rs` behind `#[cfg(windows)]`.
 
 ## Build gotchas (Windows)
 

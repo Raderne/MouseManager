@@ -1,4 +1,7 @@
-mod config;
+pub mod action;
+pub mod config;
+pub mod event;
+pub mod platform;
 
 use config::Config;
 use std::{path::PathBuf, sync::Mutex};

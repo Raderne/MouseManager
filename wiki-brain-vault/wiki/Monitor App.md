@@ -33,4 +33,6 @@ Mouse button names are checked **before** key names, because `Keys.Back` is Back
 - The project is `WinExe`, so PowerShell doesn't wait for it. Pipe the console modes into `| Out-Host`.
 - Stop the running app before `dotnet build`, because the exe is locked.
 
+The Rust port is `App/src-tauri/src/action.rs` ([[Tauri Rewrite]] → Rust core).
+
 Related: [[N230 Control]], [[N230 Hardware]].

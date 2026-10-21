@@ -141,6 +141,16 @@ All colors are CSS variables, so a theme switch is one attribute change on `<htm
 
 **Done when:** `cargo test` passes on both systems.
 
+**Status (2026-10-21):**
+- ✅ Windows: `cargo test` passes all 11 tests, with no warnings.
+- ⏳ Linux: not run yet.
+- Not ported, because they don't belong to the shared core:
+  - the `INPUT` struct size and the raw-input decode checks → Phase 4
+  - the DPI-from-counts check → Phase 6, in JS
+- `Key` is an OS-neutral enum, so the Phase 4 and Phase 9 key maps must be exhaustive `match`es. The parser also accepts the old WinForms `Keys` names (`Return`, `Prior`, `OemMinus`, …).
+- `platform/stub.rs` serves every OS for now. Phase 4 swaps in `windows.rs`.
+- Events go to the UI on one channel, tagged `{"type": "button", …}`.
+
 ## Phase 4: Windows backend
 
 Port `Remapper.cs`, `Native.cs` and `RawInputLogger.cs` to `platform/windows.rs` using the `windows` crate.
