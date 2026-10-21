@@ -1,8 +1,38 @@
+mod config;
+
+use config::Config;
+use std::{path::PathBuf, sync::Mutex};
 use tauri::{
     menu::{Menu, MenuItem},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Manager, WindowEvent,
+    window::Color,
+    AppHandle, Manager, State, WebviewWindowBuilder, WindowEvent,
 };
+
+struct AppState {
+    config: Mutex<Config>,
+    path: PathBuf,
+}
+
+#[tauri::command]
+fn set_theme(theme: String, state: State<AppState>) -> Result<(), String> {
+    if !config::is_theme(&theme) {
+        return Err(format!("unknown theme '{theme}'"));
+    }
+    let mut c = state.config.lock().unwrap();
+    c.theme = theme;
+    c.save(&state.path)
+}
+
+/// Sets `data-theme` on <html> before any page script or paint, so there's no flash.
+fn theme_script(theme: &str) -> String {
+    let t = serde_json::to_string(theme).unwrap();
+    format!(
+        "(function(){{var s=function(){{document.documentElement.dataset.theme={t}}};\
+         if(document.documentElement)s();else new MutationObserver(function(_,o){{\
+         if(document.documentElement){{s();o.disconnect()}}}}).observe(document,{{childList:true}})}})()"
+    )
+}
 
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -21,7 +51,19 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .invoke_handler(tauri::generate_handler![set_theme])
         .setup(|app| {
+            let path = app.path().app_config_dir()?.join("config.json");
+            let config = Config::load(&path);
+
+            // The window has "create": false in tauri.conf.json so the theme can go in first.
+            let (r, g, b) = config::theme_bg(&config.theme);
+            WebviewWindowBuilder::from_config(app.handle(), &app.config().app.windows[0])?
+                .background_color(Color(r, g, b, 255))
+                .initialization_script(&theme_script(&config.theme))
+                .build()?;
+            app.manage(AppState { config: Mutex::new(config), path });
+
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
             TrayIconBuilder::new()

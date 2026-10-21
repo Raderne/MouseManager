@@ -23,3 +23,6 @@ Touched: N230 Hardware, DPI Measurement, Battery Reading
 
 ## [2026-10-21 21:35] session | Phase 1 Tauri skeleton on Windows
 Touched: Tauri Rewrite
+
+## [2026-10-21 21:43] session | Phase 2 themes and design tokens
+Touched: Design System, Tauri Rewrite

@@ -125,6 +125,12 @@ All colors are CSS variables, so a theme switch is one attribute change on `<htm
 
 **Done when:** all 5 themes recolor everything, muted text has a contrast ratio of at least 4.5:1 on `--panel` in every theme, and Windows and Linux look the same side by side.
 
+**Status (2026-10-21):**
+- ✅ Windows: all 5 themes recolor from first paint, and the Settings theme picker saves to `config.json` and survives a restart.
+- ✅ `cargo test` checks the CSS themes against the Rust list, and contrast ≥ 4.5:1 for muted on `--panel` and `--panel2`, text on `--panel`, and on-accent on accent. The lowest is 5.6:1 (ember on-accent).
+- ⏳ Linux side-by-side: not tested yet.
+- `config.rs` started early, holding only `theme` with load/save/defaults. Phase 3 adds the other keys.
+
 ## Phase 3: Shared Rust core
 
 - `config.rs`: load and save, with defaults for missing keys.

@@ -31,4 +31,24 @@
 - Muted text keeps a contrast ratio of at least 4.5:1 on `--panel` in every theme. Touch targets are at least 44 px. Use real `<button>`/`<select>`/`<label>`.
 - No fake data: the battery shows "—" when unknown ([[Battery Reading]]).
 
+## Implementation (Phase 2, 2026-10-21)
+
+- `App/src/styles.css` owns the colors. Theme blocks use `[data-theme="…"]` (not `:root[…]`), so they work on **any element**. Each Settings theme card carries its own `data-theme` and previews itself.
+- **No flash on start:** the window is created in Rust (`"create": false` in `tauri.conf.json`) with:
+  - an init script that sets `data-theme` on `<html>` before any paint
+  - a window `background_color` equal to the theme's `--bg`
+  
+  Rust keeps a copy of each `--bg` (`config.rs` `THEMES`). `cargo test` fails if that copy, the theme list or the 8 tokens drift from the CSS, or if any contrast pair drops below 4.5:1.
+- **Fonts:** `App/src/fonts/`, variable woff2 (latin subset) from `@fontsource-variable/*@5.3.0`, with their OFL license files.
+- **Radii tokens:** `--r-lg` 24, `--r-md` 18, `--r-sm` 12, `--r-pill`.
+- **Components:**
+  - `.card`, `.tile`
+  - `.pill`: header tabs. The selected tab is `--panel2`, as on the canvas, not an accent fill.
+  - `.pill-box`
+  - `.stage`
+  - `.chip`
+  - `.btn`
+  - `.gauge`: an SVG ring. Hide `.value` while the value is unknown, or the round cap draws a dot.
+- **Gotcha:** an author `display` rule (e.g. `.card { display:flex }`) beats the `hidden` attribute. `styles.css` has `[hidden] { display:none !important }`.
+
 Related: [[Tauri Rewrite]] (Phase 2), [[DPI Measurement]].

@@ -11,7 +11,12 @@
   <body>
     <header class="top">
       <div class="brand">
-        <span class="dot" aria-hidden="true"></span>
+        <span class="logo" aria-hidden="true">
+          <svg width="20" height="24" viewBox="0 0 20 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round">
+            <rect x="2" y="2" width="16" height="20" rx="8" />
+            <path d="M10 6v4" />
+          </svg>
+        </span>
         <div>
           <h1>N230 Control</h1>
           <p class="muted">Lenovo N230</p>
@@ -19,15 +24,22 @@
       </div>
 
       <nav class="tabs" role="tablist" aria-label="Sections">
-        <button role="tab" id="tab-buttons" aria-controls="buttons" aria-selected="true">Buttons</button>
-        <button role="tab" id="tab-performance" aria-controls="performance" aria-selected="false">Performance</button>
-        <button role="tab" id="tab-monitor" aria-controls="monitor" aria-selected="false">Monitor</button>
-        <button role="tab" id="tab-settings" aria-controls="settings" aria-selected="false">Settings</button>
+        <button class="pill" role="tab" id="tab-buttons" aria-controls="buttons" aria-selected="true">Buttons</button>
+        <button class="pill" role="tab" id="tab-performance" aria-controls="performance" aria-selected="false">Performance</button>
+        <button class="pill" role="tab" id="tab-monitor" aria-controls="monitor" aria-selected="false">Monitor</button>
+        <button class="pill" role="tab" id="tab-settings" aria-controls="settings" aria-selected="false">Settings</button>
       </nav>
 
-      <!-- Battery stays "—" until Phase 7 reads a real value. -->
-      <div class="battery" title="Battery">
-        <span class="mono" id="battery">—</span>
+      <!-- Battery stays "—" with an empty ring until Phase 7 reads a real value. -->
+      <div class="pill-box">
+        <svg class="gauge" width="40" height="40" viewBox="0 0 44 44" aria-hidden="true">
+          <circle class="track" cx="22" cy="22" r="18" />
+          <circle class="value" id="battery-ring" cx="22" cy="22" r="18" hidden />
+        </svg>
+        <div>
+          <div class="value mono" id="battery">—</div>
+          <div class="muted">Battery</div>
+        </div>
       </div>
     </header>
 
@@ -42,7 +54,37 @@
         <h2>Monitor</h2>
       </section>
       <section id="settings" role="tabpanel" aria-labelledby="tab-settings" class="card" hidden>
-        <h2>Settings</h2>
+        <div>
+          <h2 id="theme-title">Color theme</h2>
+          <p class="muted">Changes the accent and surfaces everywhere, instantly.</p>
+        </div>
+        <fieldset class="themes" role="radiogroup" aria-labelledby="theme-title">
+          <label class="theme" data-theme="pulse">
+            <input type="radio" name="theme" value="pulse" />
+            <span class="swatches" aria-hidden="true"><span class="a"></span><span class="p2"></span><span class="p"></span></span>
+            <span><span class="name">Pulse</span><br /><span class="muted">Green</span></span>
+          </label>
+          <label class="theme" data-theme="ember">
+            <input type="radio" name="theme" value="ember" />
+            <span class="swatches" aria-hidden="true"><span class="a"></span><span class="p2"></span><span class="p"></span></span>
+            <span><span class="name">Ember</span><br /><span class="muted">Red</span></span>
+          </label>
+          <label class="theme" data-theme="frost">
+            <input type="radio" name="theme" value="frost" />
+            <span class="swatches" aria-hidden="true"><span class="a"></span><span class="p2"></span><span class="p"></span></span>
+            <span><span class="name">Frost</span><br /><span class="muted">Ice blue</span></span>
+          </label>
+          <label class="theme" data-theme="amber">
+            <input type="radio" name="theme" value="amber" />
+            <span class="swatches" aria-hidden="true"><span class="a"></span><span class="p2"></span><span class="p"></span></span>
+            <span><span class="name">Amber</span><br /><span class="muted">Gold</span></span>
+          </label>
+          <label class="theme" data-theme="violet">
+            <input type="radio" name="theme" value="violet" />
+            <span class="swatches" aria-hidden="true"><span class="a"></span><span class="p2"></span><span class="p"></span></span>
+            <span><span class="name">Violet</span><br /><span class="muted">Purple</span></span>
+          </label>
+        </fieldset>
       </section>
     </main>
   </body>

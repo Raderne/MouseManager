@@ -63,6 +63,7 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
 
 - 2026-10-19: plan written; no code yet. Next: Phase 0.
 - 2026-10-21: **Phase 1 skeleton** done on Windows: `create-tauri-app` vanilla template, then `src-tauri/src/lib.rs` (tray Open/Exit, close hides to tray, `tauri-plugin-single-instance` focuses the first window, `tauri-plugin-autostart` registered) and `src/` (Pulse header, pill tabs, empty sections). Started while Phase 0 spikes 0a/0c were still open, by the user's choice. Linux check still pending.
+- 2026-10-21: **Phase 2 themes** done on Windows: 5 themes, bundled fonts, component styles, and a Settings theme picker that saves through the `set_theme` command. `config.rs` was started early (theme only). Details: [[Design System]] → Implementation. Linux side-by-side still pending.
 
 ## Build gotchas (Windows)
 
