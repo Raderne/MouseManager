@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>N230 Control</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script type="module" src="main.js"></script>
+  </head>
+
+  <body>
+    <header class="top">
+      <div class="brand">
+        <span class="dot" aria-hidden="true"></span>
+        <div>
+          <h1>N230 Control</h1>
+          <p class="muted">Lenovo N230</p>
+        </div>
+      </div>
+
+      <nav class="tabs" role="tablist" aria-label="Sections">
+        <button role="tab" id="tab-buttons" aria-controls="buttons" aria-selected="true">Buttons</button>
+        <button role="tab" id="tab-performance" aria-controls="performance" aria-selected="false">Performance</button>
+        <button role="tab" id="tab-monitor" aria-controls="monitor" aria-selected="false">Monitor</button>
+        <button role="tab" id="tab-settings" aria-controls="settings" aria-selected="false">Settings</button>
+      </nav>
+
+      <!-- Battery stays "—" until Phase 7 reads a real value. -->
+      <div class="battery" title="Battery">
+        <span class="mono" id="battery">—</span>
+      </div>
+    </header>
+
+    <main>
+      <section id="buttons" role="tabpanel" aria-labelledby="tab-buttons" class="card">
+        <h2>Buttons</h2>
+      </section>
+      <section id="performance" role="tabpanel" aria-labelledby="tab-performance" class="card" hidden>
+        <h2>Performance</h2>
+      </section>
+      <section id="monitor" role="tabpanel" aria-labelledby="tab-monitor" class="card" hidden>
+        <h2>Monitor</h2>
+      </section>
+      <section id="settings" role="tabpanel" aria-labelledby="tab-settings" class="card" hidden>
+        <h2>Settings</h2>
+      </section>
+    </main>
+  </body>
+</html>

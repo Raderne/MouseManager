@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | Folder | What |
 |---|---|
 | `Monitor/` | The working Windows app: .NET 10 WinForms, C#, no NuGet packages, P/Invoke in `Native.cs`. The reference implementation. Keep it until Phase 10 of the rewrite is done. |
-| `App/` | The rewrite: **Tauri 2 + Rust core + vanilla HTML/JS UI**, for Windows and Linux. Plan: `App/STEPS.md` (phases 0–10). No code yet. |
+| `App/` | The rewrite: **Tauri 2 + Rust core + vanilla HTML/JS UI**, for Windows and Linux. Plan: `App/STEPS.md` (phases 0–10). Phase 1 skeleton exists. |
 | `wiki-brain-vault/` | The project knowledge base. **Read it first** (see below). |
 
 ## Commands

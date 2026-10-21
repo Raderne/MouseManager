@@ -20,3 +20,6 @@ Touched: N230 Control, N230 Hardware, Monitor App, Windows Input Backend, Linux 
 
 ## [2026-10-19 14:00] session | Phase 0: toolchain, HID scan, scaling spike
 Touched: N230 Hardware, DPI Measurement, Battery Reading
+
+## [2026-10-21 21:35] session | Phase 1 Tauri skeleton on Windows
+Touched: Tauri Rewrite

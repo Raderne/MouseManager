@@ -84,7 +84,7 @@ Devices are stored as VID/PID, not Windows path text, so one config works on bot
 **Done when:** the three results are written in the wiki (`N230 Hardware`, `Battery Reading`, `DPI Measurement`): yes or no for battery and scaling, plus the Linux node layout.
 
 **Status (2026-10-19):**
-- ✅ Windows toolchain: Rust 1.99.1 (MSVC), Node 24, .NET 10, WebView2, VS Build Tools 2022.
+- ✅ Windows toolchain: Rust 1.99.1 (MSVC), Node 24, .NET 10, WebView2, VS Build Tools 2022. (On 2026-10-21 Rust turned out to be missing and was reinstalled. Build from the VS 2022 environment; see the wiki's `Tauri Rewrite` → Build gotchas.)
 - ✅ 0b: scaling works (about 15 µs per hook call, under 1% CPU).
 - ⏳ 0a: in progress.
 - ⏳ 0c: needs a Linux machine.
@@ -99,6 +99,10 @@ The spike tools are `Monitor\…\MouseManager.exe --hid` and `--scale <factor> <
 - `index.html` with the Pulse header and pill tabs (Buttons, Performance, Monitor, Settings). The tabs switch sections; there's no router.
 
 **Done when:** `npm run tauri dev` shows the window and the tray icon on Windows **and** Linux, and a second launch focuses the first window.
+
+**Status (2026-10-21):** started before Phase 0 was finished (the user's call; Phase 1 doesn't depend on the spikes).
+- ✅ Windows: the window, tray (Open / Exit), close-to-tray, and a second launch focusing the first (checked even while the window was hidden). Autostart plugin registered; its toggle comes in Phase 8.
+- ⏳ Linux: not tested yet (needs a Linux machine, like 0c).
 
 ## Phase 2: Themes and design tokens
 
