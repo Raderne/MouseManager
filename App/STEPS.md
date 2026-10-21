@@ -176,6 +176,13 @@ Port `Remapper.cs`, `Native.cs` and `RawInputLogger.cs` to `platform/windows.rs`
 
 **Done when:** valid mappings work right away, `Ctrl+Nope` shows an error and changes nothing, and other mice are unaffected.
 
+**Status (2026-10-21):**
+- ✅ Tested through UI Automation:
+  - `Ctrl+Nope` → "X2: unknown key 'Nope'" on the row, and `config.json` is unchanged.
+  - A preset applies and saves at once ("Saved").
+- ⏳ Real clicks (the mapping fires, other mice are unaffected): waiting on the user, together with Phase 4's checks.
+- Changed from the plan: instead of `apply({config})`, the commands are `get_config` and `set_mapping(button, mapping)`. JS sends only the text, and Rust validates, applies, then saves. Errors show in `--text` with an accent ✕, because there's no error color token.
+
 ## Phase 6: Performance screen (DPI)
 
 - **Measuring** (in JS, from `move` events):

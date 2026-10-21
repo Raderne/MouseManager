@@ -44,8 +44,62 @@
     </header>
 
     <main>
-      <section id="buttons" role="tabpanel" aria-labelledby="tab-buttons" class="card">
-        <h2>Buttons</h2>
+      <section id="buttons" role="tabpanel" aria-labelledby="tab-buttons" class="split">
+        <div class="card">
+          <h2>Your mouse</h2>
+          <svg class="diagram" id="diagram" data-selected="X2" viewBox="0 0 380 320" role="img"
+               aria-label="Top view of the N230 with the side buttons X1 and X2 and the DPI button marked">
+            <g transform="translate(140,0)">
+              <path class="body" d="M100 10 C150 10 180 50 180 120 L180 220 C180 282 146 310 100 310 C54 310 20 282 20 220 L20 120 C20 50 50 10 100 10 Z" />
+              <path class="seam" d="M100 12 L100 118" />
+              <path class="seam" d="M21 124 Q100 140 179 124" />
+              <rect class="part" x="92" y="38" width="16" height="44" rx="8" />
+              <rect class="part" x="94" y="94" width="12" height="14" rx="4" />
+              <rect class="side X2" x="11" y="120" width="13" height="40" rx="6.5" />
+              <rect class="side X1" x="11" y="168" width="13" height="40" rx="6.5" />
+            </g>
+            <g class="lead X2"><circle cx="104" cy="140" r="3" /><path d="M104 140 L150 140" /></g>
+            <g class="lead X1"><circle cx="104" cy="188" r="3" /><path d="M104 188 L150 188" /></g>
+            <g class="lead"><path d="M246 101 L272 101" /></g>
+            <text class="t-main" x="94" y="137" text-anchor="end">X2</text>
+            <text class="t-sub" x="94" y="153" text-anchor="end">Forward</text>
+            <text class="t-main" x="94" y="185" text-anchor="end">X1</text>
+            <text class="t-sub" x="94" y="201" text-anchor="end">Back</text>
+            <text class="t-main" x="278" y="98">DPI</text>
+            <text class="t-sub" x="278" y="114">on the mouse</text>
+          </svg>
+        </div>
+
+        <div class="card">
+          <h2>Side buttons</h2>
+          <div class="map-row" data-button="X2">
+            <button class="chip" type="button" aria-label="Select X2">X2</button>
+            <div class="map-label">
+              <label for="map-X2">Forward button</label>
+              <span class="muted">Front side button</span>
+            </div>
+            <select id="map-X2"></select>
+            <div class="custom" hidden>
+              <input type="text" aria-label="Custom mapping for X2" placeholder="Ctrl+Shift+T, VolumeUp, run:notepad" spellcheck="false" />
+              <button class="btn" type="button">Save</button>
+            </div>
+            <p class="status" role="status"></p>
+          </div>
+          <div class="map-row" data-button="X1">
+            <button class="chip" type="button" aria-label="Select X1">X1</button>
+            <div class="map-label">
+              <label for="map-X1">Back button</label>
+              <span class="muted">Rear side button</span>
+            </div>
+            <select id="map-X1"></select>
+            <div class="custom" hidden>
+              <input type="text" aria-label="Custom mapping for X1" placeholder="Ctrl+Shift+T, VolumeUp, run:notepad" spellcheck="false" />
+              <button class="btn" type="button">Save</button>
+            </div>
+            <p class="status" role="status"></p>
+          </div>
+          <p class="muted">Changes apply instantly, and only to the N230.</p>
+        </div>
       </section>
       <section id="performance" role="tabpanel" aria-labelledby="tab-performance" class="card" hidden>
         <h2>Performance</h2>

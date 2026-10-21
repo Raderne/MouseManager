@@ -66,6 +66,26 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
 - 2026-10-21: **Phase 2 themes** done on Windows: 5 themes, bundled fonts, component styles, and a Settings theme picker that saves through the `set_theme` command. `config.rs` was started early (theme only). Details: [[Design System]] → Implementation. Linux side-by-side still pending.
 - 2026-10-21: **Phase 3 shared core** done on Windows (11 `cargo test` checks): `config.rs` (full config), `action.rs`, `event.rs`, and `platform/` with a stub backend. Linux `cargo test` still pending.
 
+- 2026-10-21: **Phase 4 Windows backend** code done ([[Windows Input Backend]] → As built). The hands-on click checks are pending.
+- 2026-10-21: **Phase 5 Buttons screen** done:
+  - mouse diagram SVG, X2/X1 rows with presets and "Custom…"
+  - the commands `get_config` and `set_mapping(button, mapping)`
+  - the bad-mapping path was checked through UI Automation
+
+  The real-click checks are pending.
+
+## Commands (Rust ↔ UI)
+
+| Command | What |
+|---|---|
+| `get_config` | The whole config (the UI reads `buttons`) |
+| `set_mapping(button, mapping)` | `X1`/`X2`. Applies through `Handle::apply` first. On `Err` (the parser's message), nothing changes. Then saves `config.json` |
+| `set_theme(theme)` | Saves `config.theme` (the UI has already recolored) |
+
+Backend events arrive in JS on the `"n230"` channel (`listen("n230", …)`).
+
+**Testing tip:** WebView2 exposes the page to UI Automation, so a PowerShell script (`System.Windows.Automation`) can switch tabs, pick `<select>` options and type into fields without moving the user's mouse. Real N230 clicks can't be faked: `SendInput` is marked injected and has no device handle, so the backend ignores it by design.
+
 ## Rust core (Phase 3)
 
 - **`action.rs`** is the only mapping parser. `parse(text) -> Result<Action, String>`, where `Action` is `PassThrough | Disabled | Mouse(Btn) | Keys(Vec<Key>) | Run(String)`.

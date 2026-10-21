@@ -21,8 +21,28 @@ use tauri::{
 struct AppState {
     config: Mutex<Config>,
     path: PathBuf,
-    #[allow(dead_code)] // Phases 5, 6 and 8 add the commands that use it.
     backend: platform::Handle,
+}
+
+#[tauri::command]
+fn get_config(state: State<AppState>) -> Config {
+    state.config.lock().unwrap().clone()
+}
+
+/// Sets one side button's mapping. Bad text returns the parser's error (`X2: unknown key 'Nope'`)
+/// and changes nothing; good text is live at once, then saved.
+#[tauri::command]
+fn set_mapping(button: String, mapping: String, state: State<AppState>) -> Result<(), String> {
+    let mut config = state.config.lock().unwrap();
+    let mut next = config.clone();
+    match button.as_str() {
+        "X1" => next.buttons.x1 = mapping,
+        "X2" => next.buttons.x2 = mapping,
+        _ => return Err(format!("unknown button '{button}'")),
+    }
+    state.backend.apply(next.clone())?;
+    *config = next;
+    config.save(&state.path).map_err(|e| format!("Applied, but couldn't save the config: {e}"))
 }
 
 /// `--log <seconds>`: print what every mouse sends, tagged by device, like the C# app's `--log`.
@@ -86,7 +106,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![set_theme])
+        .invoke_handler(tauri::generate_handler![set_theme, get_config, set_mapping])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");
             let config = Config::load(&path);

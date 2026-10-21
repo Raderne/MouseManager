@@ -32,3 +32,6 @@ Touched: Tauri Rewrite, Monitor App
 
 ## [2026-10-21 21:54] session | Phase 4 Windows backend code
 Touched: Windows Input Backend
+
+## [2026-10-21 22:19] session | Phase 5 Buttons screen
+Touched: Tauri Rewrite
