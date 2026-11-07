@@ -3,8 +3,9 @@ pub mod config;
 pub mod event;
 pub mod platform;
 
-use config::Config;
+use config::{Config, Device};
 use event::Event;
+use tauri_plugin_autostart::ManagerExt;
 use std::{
     path::PathBuf,
     sync::{mpsc, Mutex},
@@ -92,6 +93,54 @@ fn set_theme(theme: String, state: State<AppState>) -> Result<(), String> {
     c.save(&state.path)
 }
 
+/// Monitor: report events from other devices too (default: only configured ones).
+#[tauri::command]
+fn set_all_devices(on: bool, state: State<AppState>) {
+    state.backend.set_all_devices(on);
+}
+
+/// Settings: replace the remapped device list. Validates before anything changes.
+#[tauri::command]
+fn set_devices(devices: Vec<Device>, state: State<AppState>) -> Result<(), String> {
+    for d in &devices {
+        if !config::valid_id(&d.vid) || !config::valid_id(&d.pid) {
+            return Err(format!("device {}:{} needs a 4-digit hex VID and PID", d.vid, d.pid));
+        }
+    }
+    let mut c = state.config.lock().unwrap();
+    let mut next = c.clone();
+    next.devices = devices;
+    state.backend.apply(next.clone())?;
+    *c = next;
+    c.save(&state.path).map_err(|e| format!("Applied, but couldn't save the config: {e}"))
+}
+
+#[tauri::command]
+fn set_start_minimized(enabled: bool, state: State<AppState>) -> Result<(), String> {
+    let mut c = state.config.lock().unwrap();
+    c.start_minimized = enabled;
+    c.save(&state.path)
+}
+
+#[tauri::command]
+fn set_low_battery_warning(enabled: bool, state: State<AppState>) -> Result<(), String> {
+    let mut c = state.config.lock().unwrap();
+    c.low_battery_warning = enabled;
+    c.save(&state.path)
+}
+
+/// "Start with Windows" lives in the autostart plugin, not `config.json`.
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> Result<bool, String> {
+    app.autolaunch().is_enabled().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn set_autostart(enabled: bool, app: AppHandle) -> Result<(), String> {
+    let al = app.autolaunch();
+    if enabled { al.enable() } else { al.disable() }.map_err(|e| e.to_string())
+}
+
 /// Sets `data-theme` on <html> before any page script or paint, so there's no flash.
 fn theme_script(theme: &str) -> String {
     let t = serde_json::to_string(theme).unwrap();
@@ -119,7 +168,18 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
-        .invoke_handler(tauri::generate_handler![set_theme, get_config, set_mapping, set_dpi])
+        .invoke_handler(tauri::generate_handler![
+            set_theme,
+            get_config,
+            set_mapping,
+            set_dpi,
+            set_all_devices,
+            set_devices,
+            set_start_minimized,
+            set_low_battery_warning,
+            get_autostart,
+            set_autostart
+        ])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");
             let config = Config::load(&path);
@@ -129,6 +189,7 @@ pub fn run() {
             WebviewWindowBuilder::from_config(app.handle(), &app.config().app.windows[0])?
                 .background_color(Color(r, g, b, 255))
                 .initialization_script(&theme_script(&config.theme))
+                .visible(!config.start_minimized)
                 .build()?;
 
             // Backend events go to the UI on one channel, "n230", as {"type": …, …}.

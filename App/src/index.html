@@ -135,7 +135,20 @@
         </div>
       </section>
       <section id="monitor" role="tabpanel" aria-labelledby="tab-monitor" class="card" hidden>
-        <h2>Monitor</h2>
+        <div class="monitor-head">
+          <h2>Monitor</h2>
+          <div class="monitor-actions">
+            <label class="setting compact">
+              <input type="checkbox" id="all-devices" />
+              <span class="switch" aria-hidden="true"></span>
+              <span class="name">Show all devices</span>
+            </label>
+            <button class="btn ghost" type="button" id="monitor-clear">Clear</button>
+            <button class="btn ghost" type="button" id="monitor-copy">Copy all</button>
+          </div>
+        </div>
+        <div class="eventlist" id="eventlist" role="log" aria-label="Mouse events"></div>
+        <p class="muted">Settings report: <span class="mono" id="settings-report">—</span> <span class="muted">(battery phase pending)</span></p>
       </section>
       <section id="settings" role="tabpanel" aria-labelledby="tab-settings" class="card" hidden>
         <div>
@@ -169,6 +182,35 @@
             <span><span class="name">Violet</span><br /><span class="muted">Purple</span></span>
           </label>
         </fieldset>
+
+        <div class="settings-group">
+          <h2>General</h2>
+          <label class="setting">
+            <input type="checkbox" id="autostart" />
+            <span class="switch" aria-hidden="true"></span>
+            <span class="setting-text"><span class="name">Start with Windows</span><br /><span class="muted">Launch N230 Control when you sign in.</span></span>
+          </label>
+          <label class="setting">
+            <input type="checkbox" id="start-minimized" />
+            <span class="switch" aria-hidden="true"></span>
+            <span class="setting-text"><span class="name">Start minimized</span><br /><span class="muted">Open to the tray instead of the window.</span></span>
+          </label>
+          <label class="setting">
+            <input type="checkbox" id="low-battery" />
+            <span class="switch" aria-hidden="true"></span>
+            <span class="setting-text"><span class="name">Low battery warning</span><br /><span class="muted">Notify once below 15%.</span></span>
+          </label>
+        </div>
+
+        <div class="settings-group">
+          <h2>Devices</h2>
+          <p class="muted">Only these VID:PID devices are remapped. Add the Bluetooth and wired IDs here.</p>
+          <div id="devices"></div>
+          <div class="device-actions">
+            <button class="btn ghost" type="button" id="device-add">Add device</button>
+          </div>
+          <p class="status" id="devices-status" role="status"></p>
+        </div>
       </section>
     </main>
   </body>

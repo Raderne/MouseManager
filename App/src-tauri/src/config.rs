@@ -20,6 +20,12 @@ pub fn theme_bg(name: &str) -> (u8, u8, u8) {
     hex_rgb(bg)
 }
 
+/// A device id (VID or PID) must be exactly 4 hex digits, case-insensitive.
+/// Anything else must never match a real device path.
+pub fn valid_id(s: &str) -> bool {
+    s.len() == 4 && s.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
 fn hex_rgb(hex: &str) -> (u8, u8, u8) {
     let v = |i| u8::from_str_radix(&hex[i..i + 2], 16).unwrap();
     (v(1), v(3), v(5))
@@ -161,6 +167,17 @@ mod tests {
                 assert!(r >= 4.5, "{name}: --{fg} on --{bg} is {r:.2}:1, needs 4.5:1");
             }
         }
+    }
+
+    #[test]
+    fn device_id_validation() {
+        assert!(valid_id("3554"));
+        assert!(valid_id("fc01"));
+        assert!(valid_id("FC01"));
+        assert!(!valid_id("355"), "too short");
+        assert!(!valid_id("35545"), "too long");
+        assert!(!valid_id(""), "empty");
+        assert!(!valid_id("35g4"), "non-hex");
     }
 
     #[test]

@@ -242,3 +242,48 @@ input[type="text"] { font-family: "JetBrains Mono", monospace; user-select: text
 .swatches .a { width: 28px; height: 28px; border: 0; background: var(--accent); }
 .swatches .p2 { background: var(--panel2); }
 .swatches .p { background: var(--panel); }
+
+/* Monitor screen */
+.monitor-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.monitor-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.eventlist {
+  height: 320px;
+  overflow: auto;
+  padding: 8px 12px;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  font: 13px/1.5 "JetBrains Mono", monospace;
+  user-select: text;
+}
+.eventlist .line { white-space: nowrap; padding: 1px 0; }
+.eventlist .line:hover { background: var(--panel2); }
+
+/* Toggle switch: a hidden checkbox followed by a .switch track. */
+.setting { display: flex; align-items: center; gap: 14px; cursor: pointer; }
+.setting input { position: absolute; opacity: 0; pointer-events: none; }
+.switch { flex: none; width: 40px; height: 24px; border-radius: var(--r-pill); background: var(--line); position: relative; transition: background 0.15s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--text); transition: left 0.15s; }
+.setting input:checked + .switch { background: var(--accent); }
+.setting input:checked + .switch::after { left: 19px; background: var(--on-accent); }
+.setting input:focus-visible + .switch { outline: 2px solid var(--accent); outline-offset: 2px; }
+.setting.compact { gap: 8px; }
+.setting-text { display: flex; flex-direction: column; }
+.setting-text .name { font-weight: 600; }
+
+/* Settings groups */
+.settings-group { display: flex; flex-direction: column; gap: 14px; }
+.settings-group h2 { font-size: 16px; }
+.device-row { display: flex; align-items: center; gap: 8px; }
+.device-row input { width: 92px; font-family: "JetBrains Mono", monospace; text-transform: uppercase; }
+.device-row .sep { color: var(--muted); font-weight: 700; }
+.device-actions { display: flex; gap: 8px; }
+
+/* Secondary button */
+.btn.ghost { background: var(--panel2); color: var(--text); }
+
+/* Generic status line */
+.status { font-size: 13px; color: var(--muted); }
+.status:empty { display: none; }
+.status.error { color: var(--text); font-weight: 600; }
+.status.error::before { content: "✕ "; color: var(--accent); }

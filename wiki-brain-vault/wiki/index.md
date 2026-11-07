@@ -33,6 +33,7 @@ _(summaries of sources ingested from `raw/`: none yet)_
 
 - [[Windows Input Backend]] § gotchas: one Raw Input registration per process; nothing slow inside the hook.
 - [[DPI Measurement]] § the ~11 DPI reading: a 20-count cutoff counts a 1 mm nudge as a full slide.
+- [[Battery Reading]] § why no kernel driver: feature report 6 is reachable from user space and the mouse has no output reports, so a driver adds cost, not capability.
 
 ## Meta
 

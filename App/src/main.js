@@ -143,7 +143,55 @@ $("measure").addEventListener("click", () => {
     : "";
 });
 
+// Monitor screen: buffered event list, redrawn at most every 100 ms.
+const eventList = $("eventlist");
+const monitorBuf = [];
+const MAX_LINES = 1000;
+
+const stamp = (d = new Date()) =>
+  `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}:${String(d.getSeconds()).padStart(2, "0")}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+
+function fmtEvent(ev) {
+  switch (ev.type) {
+    case "button": return `${ev.target ? "N230 " : "other"} ${ev.button}-${ev.down ? "down" : "up"}  ${ev.device || ""}`;
+    case "settings": return `N230  settings report ${ev.hex}`;
+    case "device": return `device ${ev.connected ? "connected" : "disconnected"}${ev.permission ? "" : " (no permission)"}`;
+    case "error": return `error  ${ev.message}`;
+    case "battery": return `battery ${ev.percent ?? "—"}`;
+    default: return JSON.stringify(ev);
+  }
+}
+
+function addEventLine(ev) {
+  if (ev.type === "move") return; // movement feeds the DPI meter, not the list
+  if (ev.type === "settings") $("settings-report").textContent = ev.hex;
+  monitorBuf.push(`${stamp()}  ${fmtEvent(ev)}`);
+  if (monitorBuf.length > MAX_LINES) monitorBuf.splice(0, monitorBuf.length - MAX_LINES);
+}
+
+setInterval(() => {
+  if (!monitorBuf.length) return;
+  const lines = monitorBuf.splice(0, monitorBuf.length);
+  const frag = document.createDocumentFragment();
+  for (const line of lines) {
+    const div = document.createElement("div");
+    div.className = "line";
+    div.textContent = line;
+    frag.appendChild(div);
+  }
+  eventList.appendChild(frag);
+  while (eventList.children.length > MAX_LINES) eventList.firstElementChild.remove();
+  eventList.scrollTop = eventList.scrollHeight;
+}, 100);
+
+$("all-devices").addEventListener("change", (e) => invoke("set_all_devices", { on: e.target.checked }));
+$("monitor-clear").addEventListener("click", () => eventList.replaceChildren());
+$("monitor-copy").addEventListener("click", () =>
+  navigator.clipboard.writeText([...eventList.children].map((d) => d.textContent).join("\n")).catch(() => console.error("copy failed"))
+);
+
 listen("n230", ({ payload: ev }) => {
+  addEventLine(ev);
   if (measuring && ev.type === "move" && ev.target) meter.move(ev.dx, ev.dy, performance.now());
 });
 
@@ -173,6 +221,7 @@ invoke("get_config").then((config) => {
   target = config.targetDpi;
   meter = new Meter(measured);
   renderDpi();
+  setupSettings(config);
 });
 
 // Theme picker. Rust set data-theme before first paint; recolor at once, then save.
@@ -183,4 +232,107 @@ for (const radio of document.querySelectorAll('input[name="theme"]')) {
     root.dataset.theme = radio.value;
     invoke("set_theme", { theme: radio.value }).catch((e) => console.error("set_theme:", e));
   });
+}
+
+// Settings: general toggles and the device list.
+const validId = (s) => /^[0-9A-Fa-f]{4}$/.test(s);
+let devices = []; // last successfully saved list
+
+const sayDevices = (text, error = false) => {
+  const el = $("devices-status");
+  el.textContent = text;
+  el.classList.toggle("error", error);
+};
+
+function deviceRow(d) {
+  const row = document.createElement("div");
+  row.className = "device-row";
+  const vid = document.createElement("input");
+  vid.className = "vid";
+  vid.maxLength = 4;
+  vid.value = d.vid;
+  vid.spellcheck = false;
+  vid.setAttribute("aria-label", "VID");
+  vid.placeholder = "VID";
+  const sep = document.createElement("span");
+  sep.className = "sep";
+  sep.textContent = ":";
+  const pid = document.createElement("input");
+  pid.className = "pid";
+  pid.maxLength = 4;
+  pid.value = d.pid;
+  pid.spellcheck = false;
+  pid.setAttribute("aria-label", "PID");
+  pid.placeholder = "PID";
+  const del = document.createElement("button");
+  del.className = "btn ghost";
+  del.type = "button";
+  del.textContent = "✕";
+  del.setAttribute("aria-label", "Remove device");
+  del.addEventListener("click", () => {
+    row.remove();
+    commitDevices(readDevices());
+  });
+  for (const input of [vid, pid]) input.addEventListener("change", () => commitDevices(readDevices()));
+  row.append(vid, sep, pid, del);
+  return row;
+}
+
+function readDevices() {
+  return [...$("devices").querySelectorAll(".device-row")].map((row) => ({
+    vid: row.querySelector(".vid").value.trim().toUpperCase(),
+    pid: row.querySelector(".pid").value.trim().toUpperCase(),
+  }));
+}
+
+function commitDevices(list) {
+  if (!list.every((d) => validId(d.vid) && validId(d.pid))) {
+    sayDevices("Each VID and PID must be exactly 4 hex digits.", true);
+    return;
+  }
+  invoke("set_devices", { devices: list }).then(
+    () => {
+      devices = list;
+      sayDevices("Saved");
+    },
+    (e) => {
+      sayDevices(String(e), true);
+      renderDevices(devices); // revert to the last saved list
+    }
+  );
+}
+
+function renderDevices(list) {
+  devices = list;
+  const box = $("devices");
+  box.replaceChildren();
+  for (const d of list) box.appendChild(deviceRow(d));
+}
+
+function setupSettings(config) {
+  renderDevices(config.devices);
+
+  const auto = $("autostart");
+  invoke("get_autostart").then((on) => (auto.checked = on)).catch((e) => console.error("get_autostart:", e));
+  auto.addEventListener("change", () =>
+    invoke("set_autostart", { enabled: auto.checked }).then(
+      () => {},
+      (e) => {
+        auto.checked = !auto.checked;
+        console.error("set_autostart:", e);
+      }
+    )
+  );
+
+  $("start-minimized").checked = config.startMinimized;
+  $("start-minimized").addEventListener("change", (e) =>
+    invoke("set_start_minimized", { enabled: e.target.checked }).catch(() => (e.target.checked = !e.target.checked))
+  );
+
+  $("low-battery").checked = config.lowBatteryWarning;
+  $("low-battery").addEventListener("change", (e) =>
+    invoke("set_low_battery_warning", { enabled: e.target.checked }).catch(() => (e.target.checked = !e.target.checked))
+  );
+
+  $("device-add").addEventListener("click", () => $("devices").appendChild(deviceRow({ vid: "", pid: "" })));
 }
