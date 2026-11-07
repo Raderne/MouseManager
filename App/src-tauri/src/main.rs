@@ -9,5 +9,8 @@ fn main() {
     if args.get(1).is_some_and(|a| a == "--scan") {
         return n230_control_lib::scan(args.get(2).and_then(|s| s.parse().ok()));
     }
+    if args.get(1).is_some_and(|a| a == "--paired") {
+        return n230_control_lib::paired();
+    }
     n230_control_lib::run()
 }

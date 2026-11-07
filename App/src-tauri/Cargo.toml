@@ -37,11 +37,15 @@ strip = true
 windows = { version = "0.61", features = [
   "Devices_Bluetooth",
   "Devices_Bluetooth_Advertisement",
+  "Devices_Bluetooth_GenericAttributeProfile",
+  "Devices_Enumeration",
   "Devices_Radios",
   "Foundation",
   "Foundation_Collections",
   "Storage_Streams",
 ] }
+# IAsyncOperation / AsyncStatus live here since windows 0.61 (not re-exported); same version windows uses.
+windows-future = "0.2"
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_Com",

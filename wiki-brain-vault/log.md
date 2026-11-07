@@ -95,3 +95,6 @@ Touched: Bluetooth Connection
 
 ## [2026-11-07 17:20] session | B3 done on Windows (hands-on)
 Touched: Bluetooth Connection
+
+## [2026-11-07 17:50] session | B4 pair and forget built (Windows)
+Touched: Bluetooth Connection

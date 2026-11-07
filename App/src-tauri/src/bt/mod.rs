@@ -1,4 +1,4 @@
-//! The Bluetooth connection layer: adapter state and searching for the mouse (phase B3; pairing is B4).
+//! The Bluetooth connection layer: adapter state, searching (B3), pairing and forgetting (B4).
 //! Separate from `platform/`: once paired, the OS HID stack owns the mouse and `platform/` remaps it as usual.
 //! Each OS module has the same functions, picked with `#[cfg]`:
 //!
@@ -8,9 +8,13 @@
 //!     pub fn adapter(&self) -> AdapterState;
 //!     pub fn scan(&self, on: bool) -> Result<(), String>;   // emits btScan / btFound, stops by itself after SCAN_SECS
 //!     pub fn open_settings(&self) -> Result<(), String>;    // the OS Bluetooth page; we never switch the radio ourselves
+//!     pub fn pair(&self, address: &str) -> Result<Paired, String>;   // B4: blocks up to ~40 s; call off the UI thread
+//!     pub fn forget(&self, address: &str) -> Result<(), String>;     // B4: unpair in the OS
+//!     pub fn paired(&self) -> Vec<PairedMouse>;                      // B4: mice the OS has paired
 //! }
 //! ```
 //!
+//! Pairing, forgetting and trusting only ever start from a click in the app, never by themselves.
 //! What a found device *is* (mouse? N230?) is decided here in Rust, never in JS.
 
 use serde::Serialize;
@@ -72,6 +76,37 @@ pub fn appearance(data: &[u8]) -> Option<u16> {
     (data.len() == 2).then(|| u16::from_le_bytes([data[0], data[1]]))
 }
 
+/// The result of a successful pairing (B4).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Paired {
+    pub address: String,
+    pub name: String,
+    /// From the PnP ID characteristic; `None` if it couldn't be read.
+    pub id: Option<crate::device::DeviceId>,
+}
+
+/// A mouse paired with this PC, for the "Paired" list and Forget.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+pub struct PairedMouse {
+    pub address: String,
+    pub name: String,
+    pub n230: bool,
+    pub connected: bool,
+}
+
+pub fn is_n230(name: &str) -> bool {
+    name.to_ascii_uppercase().contains("N230")
+}
+
+/// `AA:BB:CC:DD:EE:FF` (or with `-`, any case) → the 48-bit address. Anything else is `None`.
+pub fn parse_address(s: &str) -> Option<u64> {
+    let parts: Vec<&str> = s.split([':', '-']).collect();
+    if parts.len() != 6 || parts.iter().any(|p| p.len() != 2) {
+        return None;
+    }
+    parts.iter().try_fold(0u64, |acc, p| Some(acc << 8 | u8::from_str_radix(p, 16).ok()? as u64))
+}
+
 /// `AA:BB:CC:DD:EE:FF` from the 48-bit address.
 pub fn format_address(a: u64) -> String {
     (0..6).rev().map(|i| format!("{:02X}", (a >> (8 * i)) & 0xFF)).collect::<Vec<_>>().join(":")
@@ -120,7 +155,7 @@ impl Scan {
         let name = known.name.clone().unwrap_or_default();
         let next = Found {
             address: last.address.clone(),
-            n230: name.to_ascii_uppercase().contains("N230"),
+            n230: is_n230(&name),
             name,
             rssi: adv.rssi,
             bars: bars(adv.rssi),
@@ -158,6 +193,12 @@ mod tests {
         assert_eq!(appearance(&[0xC2, 0x03]), Some(0x03C2), "the bytes B0 saw (C203)");
         assert_eq!(appearance(&[0xC2]), None);
         assert_eq!([bars(-50), bars(-65), bars(-75), bars(-85), bars(-95)], [4, 3, 2, 1, 0]);
+        assert_eq!(parse_address("FE:46:E9:24:04:91"), Some(0xFE46_E924_0491));
+        assert_eq!(parse_address("fe-46-e9-24-04-91"), Some(0xFE46_E924_0491));
+        assert_eq!(parse_address(&format_address(0x0012_3456_789A)), Some(0x0012_3456_789A), "round trip");
+        for bad in ["", "FE:46:E9:24:04", "FE:46:E9:24:04:91:00", "FE:46:E9:24:04:9", "FE:46:E9:24:04:GG", "FE46E9240491"] {
+            assert_eq!(parse_address(bad), None, "{bad}");
+        }
     }
 
     #[test]

@@ -115,6 +115,40 @@ impl Default for Config {
 }
 
 impl Config {
+    /// After pairing in the app: record the Bluetooth address and name on the entry for this VID/PID
+    /// (adding one if there's none). `id` is `None` when the PnP ID couldn't be read: nothing to match, no change.
+    /// Returns whether anything changed.
+    pub fn remember_bluetooth(&mut self, id: Option<DeviceId>, address: &str, name: &str) -> bool {
+        let Some(id) = id else { return false };
+        let bt = DeviceId { bus: Bus::Bluetooth, ..id };
+        let name = Some(name.to_string()).filter(|n| !n.is_empty());
+        let before = self.devices.clone();
+        match self.devices.iter_mut().find(|d| d.matches(&bt)) {
+            Some(d) => {
+                d.bus = Some(Bus::Bluetooth);
+                d.address = Some(address.to_string());
+                d.name = name.or(d.name.take());
+            }
+            None => self.devices.push(Device {
+                address: Some(address.to_string()),
+                name,
+                ..Device::new(&format!("{:04X}", bt.vid), &format!("{:04X}", bt.pid), Some(Bus::Bluetooth))
+            }),
+        }
+        self.devices != before
+    }
+
+    /// After forgetting in the app: drop the address, keep the VID/PID entry so a later pairing is
+    /// still remapped. Returns whether anything changed.
+    pub fn forget_bluetooth(&mut self, address: &str) -> bool {
+        let mut changed = false;
+        for d in self.devices.iter_mut().filter(|d| d.address.as_deref().is_some_and(|a| a.eq_ignore_ascii_case(address))) {
+            d.address = None;
+            changed = true;
+        }
+        changed
+    }
+
     /// Movement scale for the backend: target ÷ measured, 1.0 when either is unknown.
     /// Clamped so a hand-edited config can't make the pointer unusable.
     pub fn scale(&self) -> f64 {
@@ -231,6 +265,34 @@ mod tests {
             assert!(!bad.matches(&bt), "{bad:?} must match nothing");
         }
         assert!(Config::default().devices.iter().any(|d| d.matches(&usb)) && Config::default().devices.iter().any(|d| d.matches(&bt)));
+    }
+
+    #[test]
+    fn remember_and_forget_bluetooth() {
+        let n230 = Some(DeviceId { bus: Bus::Bluetooth, vid: 0x25A7, pid: 0xFAA2 });
+        let mut c = Config::default();
+        assert!(c.remember_bluetooth(n230, "FE:46:E9:24:04:91", "Lenovo Services N230 BT1"));
+        assert_eq!(c.devices.len(), 2, "the default Bluetooth entry is updated, not duplicated");
+        let bt = &c.devices[1];
+        assert_eq!((bt.address.as_deref(), bt.name.as_deref()), (Some("FE:46:E9:24:04:91"), Some("Lenovo Services N230 BT1")));
+        assert!(!c.remember_bluetooth(n230, "FE:46:E9:24:04:91", "Lenovo Services N230 BT1"), "same again: no change");
+        assert!(!c.remember_bluetooth(None, "FE:46:E9:24:04:91", "x"), "no PnP ID: nothing to match");
+
+        // An entry without a bus (old config) is claimed for Bluetooth; an empty name keeps the old one.
+        let mut old = Config { devices: vec![Device { name: Some("mine".into()), ..Device::new("25a7", "faa2", None) }], ..Config::default() };
+        assert!(old.remember_bluetooth(n230, "AA:BB:CC:DD:EE:FF", ""));
+        assert_eq!((old.devices[0].bus, old.devices[0].name.as_deref()), (Some(Bus::Bluetooth), Some("mine")));
+
+        // A mouse not in the list gets a new entry; a USB-only entry for the same IDs isn't reused.
+        let mut usb = Config { devices: vec![Device::new("25A7", "FAA2", Some(Bus::Usb))], ..Config::default() };
+        assert!(usb.remember_bluetooth(n230, "AA:BB:CC:DD:EE:FF", "N230"));
+        assert_eq!(usb.devices.len(), 2);
+        assert_eq!((usb.devices[1].vid.as_str(), usb.devices[1].pid.as_str()), ("25A7", "FAA2"));
+
+        assert!(c.forget_bluetooth("fe:46:e9:24:04:91"), "address match ignores case");
+        assert_eq!(c.devices[1].address, None);
+        assert!(c.devices[1].matches(&n230.unwrap()), "the VID/PID entry stays, so pairing again still remaps");
+        assert!(!c.forget_bluetooth("FE:46:E9:24:04:91"), "already forgotten");
     }
 
     #[test]

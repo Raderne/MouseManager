@@ -40,6 +40,48 @@ fn bt_scan(on: bool, state: State<AppState>) -> Result<(), String> {
     state.bt.scan(on)
 }
 
+/// Pairs the mouse at `address` (B4), then records its address and name on the config entry for its
+/// VID/PID so it's remapped. Runs off the UI thread: pairing can take up to ~40 s.
+/// Returns the device list (the Settings screen re-renders it) and a status line.
+#[tauri::command]
+async fn bt_pair(address: String, state: State<'_, AppState>) -> Result<(Vec<Device>, String), String> {
+    let bt = state.bt.clone();
+    let paired = tauri::async_runtime::spawn_blocking(move || bt.pair(&address)).await.map_err(|e| e.to_string())??;
+    let mut c = state.config.lock().unwrap();
+    let mut next = c.clone();
+    let message = if next.remember_bluetooth(paired.id, &paired.address, &paired.name) {
+        state.backend.apply(next.clone())?;
+        *c = next;
+        c.save(&state.path).map_err(|e| format!("Paired, but couldn't save the config: {e}"))?;
+        "Paired. Move the mouse to connect."
+    } else if paired.id.is_none() {
+        "Paired, but its VID/PID couldn't be read. If the side buttons aren't remapped, add it under Devices."
+    } else {
+        "Paired. Move the mouse to connect."
+    };
+    Ok((c.devices.clone(), message.into()))
+}
+
+/// Unpairs the mouse in the OS and drops its address from the config (the VID/PID entry stays).
+#[tauri::command]
+async fn bt_forget(address: String, state: State<'_, AppState>) -> Result<Vec<Device>, String> {
+    let bt = state.bt.clone();
+    let addr = address.clone();
+    tauri::async_runtime::spawn_blocking(move || bt.forget(&addr)).await.map_err(|e| e.to_string())??;
+    let mut c = state.config.lock().unwrap();
+    if c.forget_bluetooth(&address) {
+        c.save(&state.path).map_err(|e| format!("Forgotten, but couldn't save the config: {e}"))?;
+    }
+    Ok(c.devices.clone())
+}
+
+/// Mice the OS has paired over Bluetooth LE.
+#[tauri::command]
+async fn bt_paired(state: State<'_, AppState>) -> Result<Vec<bt::PairedMouse>, String> {
+    let bt = state.bt.clone();
+    tauri::async_runtime::spawn_blocking(move || bt.paired()).await.map_err(|e| e.to_string())
+}
+
 /// Opens the OS Bluetooth settings (to switch the radio on: the app never does that itself).
 #[tauri::command]
 fn bt_open_settings(state: State<AppState>) -> Result<(), String> {
@@ -128,6 +170,14 @@ pub fn scan(stop_after: Option<u64>) {
         if ev == (Event::BtScan { active: false }) {
             break;
         }
+    }
+}
+
+/// `--paired`: the Bluetooth mice the OS has paired (B4), one per line.
+pub fn paired() {
+    let (tx, _rx) = mpsc::channel();
+    for m in bt::start(tx).paired() {
+        println!("{m:?}");
     }
 }
 
@@ -229,7 +279,10 @@ pub fn run() {
             set_autostart,
             bt_adapter,
             bt_scan,
-            bt_open_settings
+            bt_open_settings,
+            bt_pair,
+            bt_forget,
+            bt_paired
         ])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");

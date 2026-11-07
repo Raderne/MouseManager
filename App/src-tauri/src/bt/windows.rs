@@ -1,29 +1,40 @@
 //! Windows: WinRT `BluetoothLEAdvertisementWatcher` for searching, `BluetoothAdapter` + `Radio` for adapter state.
 //! WinRT calls run on our own threads (implicit MTA), never on the UI thread or the input hook thread.
 
-use super::{appearance, AdapterState, Advert, Scan, AD_APPEARANCE, SCAN_SECS};
-use crate::event::Event;
+use super::{appearance, format_address, is_n230, parse_address, AdapterState, Advert, Paired, PairedMouse, Scan, AD_APPEARANCE, SCAN_SECS};
+use crate::{device::DeviceId, event::Event};
 use std::{
     sync::{mpsc::Sender, Arc, Mutex},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 use windows::{
-    core::{Ref, GUID},
+    core::{Ref, RuntimeType, GUID, HSTRING},
     Devices::{
         Bluetooth::{
             Advertisement::{
                 BluetoothLEAdvertisementReceivedEventArgs, BluetoothLEAdvertisementWatcher,
                 BluetoothLEAdvertisementWatcherStoppedEventArgs, BluetoothLEScanningMode,
             },
-            BluetoothAdapter,
+            BluetoothAdapter, BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
+            GenericAttributeProfile::{GattCharacteristicUuids, GattCommunicationStatus, GattServiceUuids},
+        },
+        Enumeration::{
+            DeviceInformation, DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel,
+            DevicePairingRequestedEventArgs, DevicePairingResultStatus, DeviceUnpairingResultStatus,
         },
         Radios::RadioState,
     },
     Foundation::TypedEventHandler,
-    Storage::Streams::DataReader,
+    Storage::Streams::{DataReader, IBuffer},
 };
+use windows_future::{AsyncStatus, IAsyncOperation};
 
+/// GAP appearance "HID Mouse", for the paired list.
+const APPEARANCE_MOUSE: u16 = 0x03C2;
+const PAIR_SECS: u64 = 30;
+
+#[derive(Clone)]
 pub struct BtHandle {
     events: Sender<Event>,
     inner: Arc<Mutex<Inner>>,
@@ -166,6 +177,168 @@ impl BtHandle {
     pub fn open_settings(&self) -> Result<(), String> {
         std::process::Command::new("explorer.exe").arg("ms-settings:bluetooth").spawn().map(|_| ()).map_err(|e| e.to_string())
     }
+
+    /// Pairs with "just works" (confirm only), as mice do. A PIN request fails with a message instead
+    /// of being answered for the user. On failure, a half-made pairing is removed.
+    pub fn pair(&self, address: &str) -> Result<Paired, String> {
+        let addr = parse_address(address).ok_or_else(|| format!("'{address}' isn't a Bluetooth address"))?;
+        stop_watcher(&self.inner, &self.events, None); // the radio pairs more reliably without an active scan
+        on_mta(move || pair_blocking(addr)).ok_or("the Bluetooth pairing thread failed")?
+    }
+
+    pub fn forget(&self, address: &str) -> Result<(), String> {
+        let addr = parse_address(address).ok_or_else(|| format!("'{address}' isn't a Bluetooth address"))?;
+        on_mta(move || forget_blocking(addr)).ok_or("the Bluetooth thread failed")?
+    }
+
+    pub fn paired(&self) -> Vec<PairedMouse> {
+        on_mta(|| paired_mice().unwrap_or_default()).unwrap_or_default()
+    }
+}
+
+/// Waits for a WinRT async operation without `.get()`, so it can give up: a mouse that leaves pairing
+/// mode mid-way must not hang the app. Cancels the operation on timeout.
+fn wait<T: RuntimeType + 'static>(op: IAsyncOperation<T>, secs: u64, what: &str) -> Result<T, String> {
+    let end = Instant::now() + Duration::from_secs(secs);
+    loop {
+        match op.Status().map_err(|e| e.message())? {
+            AsyncStatus::Started if Instant::now() < end => thread::sleep(Duration::from_millis(100)),
+            AsyncStatus::Started => {
+                let _ = op.Cancel();
+                return Err(format!("Timed out {what}. Move the mouse to wake it and try again."));
+            }
+            AsyncStatus::Completed => return op.GetResults().map_err(|e| e.message()),
+            _ => return Err(format!("Failed {what}: {}", op.ErrorCode().map(|c| c.message()).unwrap_or_default())),
+        }
+    }
+}
+
+/// The LE device at this address. Mice use random addresses (B0), so that type is tried first.
+fn le_device(addr: u64) -> Result<BluetoothLEDevice, String> {
+    for kind in [BluetoothAddressType::Random, BluetoothAddressType::Public] {
+        if let Ok(op) = BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync(addr, kind) {
+            if let Ok(d) = wait(op, 10, "finding the mouse") {
+                return Ok(d);
+            }
+        }
+    }
+    Err("The mouse isn't reachable. Put it in pairing mode and search again.".into())
+}
+
+fn pairing_message(s: DevicePairingResultStatus) -> String {
+    match s {
+        DevicePairingResultStatus::AuthenticationTimeout => "The mouse didn't answer in time. Is it still in pairing mode?".into(),
+        DevicePairingResultStatus::ConnectionRejected | DevicePairingResultStatus::RejectedByHandler => {
+            "The mouse refused the pairing. Put it in pairing mode again and retry.".into()
+        }
+        DevicePairingResultStatus::RequiredHandlerNotRegistered | DevicePairingResultStatus::PairingCanceled => {
+            "This device asks for a PIN. Pair it in the Windows Bluetooth settings instead.".into()
+        }
+        DevicePairingResultStatus::NotReadyToPair => "The mouse isn't ready to pair. Put it in pairing mode and search again.".into(),
+        other => format!("Pairing failed (Windows status {}). Put the mouse in pairing mode and retry.", other.0),
+    }
+}
+
+fn pair_blocking(addr: u64) -> Result<Paired, String> {
+    let dev = le_device(addr)?;
+    let name = dev.Name().map(|n| n.to_string()).unwrap_or_default();
+    let pairing = dev.DeviceInformation().and_then(|i| i.Pairing()).map_err(|e| e.message())?;
+    if !pairing.IsPaired().unwrap_or(false) {
+        if !pairing.CanPair().unwrap_or(false) {
+            return Err("Windows can't pair this device right now. Is it in pairing mode?".into());
+        }
+        let custom: DeviceInformationCustomPairing = pairing.Custom().map_err(|e| e.message())?;
+        let token = custom
+            .PairingRequested(&TypedEventHandler::new(
+                |_: Ref<DeviceInformationCustomPairing>, args: Ref<DevicePairingRequestedEventArgs>| {
+                    if let Some(a) = args.as_ref() {
+                        if a.PairingKind()? == DevicePairingKinds::ConfirmOnly {
+                            a.Accept()?; // "just works": nothing for the user to compare or type
+                        }
+                    }
+                    Ok(())
+                },
+            ))
+            .map_err(|e| e.message())?;
+        let result = custom
+            .PairWithProtectionLevelAsync(DevicePairingKinds::ConfirmOnly, DevicePairingProtectionLevel::Default)
+            .map_err(|e| e.message())
+            .and_then(|op| wait(op, PAIR_SECS, "pairing"));
+        let _ = custom.RemovePairingRequested(token);
+        let status = result.and_then(|r| r.Status().map_err(|e| e.message()));
+        match status {
+            Ok(DevicePairingResultStatus::Paired | DevicePairingResultStatus::AlreadyPaired) => {}
+            failed => {
+                if pairing.IsPaired().unwrap_or(false) {
+                    let _ = pairing.UnpairAsync().map(|op| wait(op, 10, "undoing the pairing"));
+                }
+                return Err(match failed {
+                    Ok(s) => pairing_message(s),
+                    Err(e) => e,
+                });
+            }
+        }
+    }
+    Ok(Paired { address: format_address(addr), name, id: read_pnp_id(&dev).ok() })
+}
+
+/// The Device Information service's PnP ID (0x2A50): the VID/PID the mouse has on this link (B0: 25A7:FAA2).
+fn read_pnp_id(dev: &BluetoothLEDevice) -> Result<DeviceId, String> {
+    let e = |e: windows::core::Error| e.message();
+    let services = wait(
+        dev.GetGattServicesForUuidWithCacheModeAsync(GattServiceUuids::DeviceInformation().map_err(e)?, BluetoothCacheMode::Uncached).map_err(e)?,
+        10,
+        "reading the device information",
+    )?;
+    let service = services.Services().map_err(e)?.GetAt(0).map_err(e)?;
+    let chars = wait(service.GetCharacteristicsForUuidAsync(GattCharacteristicUuids::PnpId().map_err(e)?).map_err(e)?, 10, "reading the PnP ID")?;
+    let read = wait(chars.Characteristics().map_err(e)?.GetAt(0).map_err(e)?.ReadValueWithCacheModeAsync(BluetoothCacheMode::Uncached).map_err(e)?, 10, "reading the PnP ID")?;
+    if read.Status().map_err(e)? != GattCommunicationStatus::Success {
+        return Err("PnP ID unreadable".into());
+    }
+    DeviceId::from_pnp_id(&buffer_bytes(&read.Value().map_err(e)?)?).ok_or("bad PnP ID".into())
+}
+
+fn buffer_bytes(buf: &IBuffer) -> Result<Vec<u8>, String> {
+    let mut bytes = vec![0u8; buf.Length().map_err(|e| e.message())? as usize];
+    DataReader::FromBuffer(buf).and_then(|r| r.ReadBytes(&mut bytes)).map_err(|e| e.message())?;
+    Ok(bytes)
+}
+
+fn forget_blocking(addr: u64) -> Result<(), String> {
+    let dev = le_device(addr)?;
+    let pairing = dev.DeviceInformation().and_then(|i| i.Pairing()).map_err(|e| e.message())?;
+    if !pairing.IsPaired().unwrap_or(false) {
+        return Ok(());
+    }
+    let r = wait(pairing.UnpairAsync().map_err(|e| e.message())?, 15, "forgetting the mouse")?;
+    match r.Status().map_err(|e| e.message())? {
+        DeviceUnpairingResultStatus::Unpaired | DeviceUnpairingResultStatus::AlreadyUnpaired => Ok(()),
+        s => Err(format!("Windows couldn't forget the mouse (status {}).", s.0)),
+    }
+}
+
+/// Paired LE devices that are mice (appearance 0x03C2) or named like the N230.
+fn paired_mice() -> Result<Vec<PairedMouse>, String> {
+    let e = |e: windows::core::Error| e.message();
+    let selector: HSTRING = BluetoothLEDevice::GetDeviceSelectorFromPairingState(true).map_err(e)?;
+    let infos = wait(DeviceInformation::FindAllAsyncAqsFilter(&selector).map_err(e)?, 10, "listing paired devices")?;
+    let mut out = Vec::new();
+    for info in infos {
+        let Ok(op) = BluetoothLEDevice::FromIdAsync(&info.Id().map_err(e)?) else { continue };
+        let Ok(dev) = wait(op, 5, "opening a paired device") else { continue };
+        let name = dev.Name().map(|n| n.to_string()).unwrap_or_default();
+        let mouse = dev.Appearance().and_then(|a| a.RawValue()).is_ok_and(|a| a == APPEARANCE_MOUSE);
+        if mouse || is_n230(&name) {
+            out.push(PairedMouse {
+                address: format_address(dev.BluetoothAddress().map_err(e)?),
+                n230: is_n230(&name),
+                name,
+                connected: dev.ConnectionStatus().is_ok_and(|s| s == BluetoothConnectionStatus::Connected),
+            });
+        }
+    }
+    Ok(out)
 }
 
 /// Stops the current search and sends `btScan {active: false}` itself. `only`: stop only if that

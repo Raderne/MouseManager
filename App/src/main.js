@@ -195,7 +195,7 @@ $("monitor-copy").addEventListener("click", () =>
 );
 
 listen("n230", ({ payload: ev }) => {
-  if (ev.type.startsWith("bt")) {
+  if (ev.type.startsWith("bt") || ev.type === "device") {
     onBtEvent(ev);
     if (ev.type === "btFound" && !ev.mouse && !$("all-devices").checked) return; // keep the monitor about mice
   }
@@ -406,10 +406,108 @@ function renderBtFound() {
         bars.append(b);
       }
       li.append(addr, bars);
+      if (d.mouse) {
+        const pair = document.createElement("button");
+        pair.className = "btn";
+        pair.type = "button";
+        pair.textContent = "Pair";
+        pair.disabled = btPairing;
+        pair.setAttribute("aria-label", `Pair ${d.name || d.address}`);
+        pair.addEventListener("click", () => pairMouse(d));
+        li.append(pair);
+      }
       return li;
     })
   );
   return list;
+}
+
+let btPairing = false;
+let btJustPaired = false; // the next Bluetooth "connected" event finishes the flow
+
+function sayBt(text, error = false) {
+  $("bt-status").textContent = text;
+  $("bt-status").classList.toggle("error", error);
+}
+
+function pairMouse(d) {
+  btPairing = true;
+  renderBtFound();
+  sayBt(`Pairing with ${d.name || d.address}… keep the mouse close and in pairing mode.`);
+  invoke("bt_pair", { address: d.address })
+    .then(([list, message]) => {
+      renderDevices(list);
+      btFound.delete(d.address); // paired mice stop advertising
+      btJustPaired = true;
+      sayBt(message);
+      refreshPaired();
+    })
+    .catch((e) => sayBt(String(e), true))
+    .finally(() => {
+      btPairing = false;
+      renderBtFound();
+    });
+}
+
+function renderPaired(list) {
+  $("bt-paired-empty").hidden = list.length > 0;
+  $("bt-paired").replaceChildren(
+    ...list.map((m) => {
+      const li = document.createElement("li");
+      li.className = "bt-item" + (m.n230 ? " n230" : "");
+      const name = document.createElement("span");
+      name.className = "bt-name";
+      name.textContent = m.name || "Unnamed mouse";
+      const state = document.createElement("span");
+      state.className = "bt-state" + (m.connected ? " on" : "");
+      state.textContent = m.connected ? "Connected" : "Not connected";
+      const addr = document.createElement("span");
+      addr.className = "bt-addr mono";
+      addr.textContent = m.address;
+      const forget = document.createElement("button");
+      forget.className = "btn ghost";
+      forget.type = "button";
+      forget.textContent = "Forget";
+      forget.setAttribute("aria-label", `Forget ${m.name || m.address}`);
+      let armed = null; // two clicks: forgetting means pairing again later
+      forget.addEventListener("click", () => {
+        if (!armed) {
+          forget.textContent = "Click again to forget";
+          armed = setTimeout(() => {
+            armed = null;
+            forget.textContent = "Forget";
+          }, 4000);
+          return;
+        }
+        clearTimeout(armed);
+        forget.disabled = true;
+        forget.textContent = "Forgetting…";
+        invoke("bt_forget", { address: m.address })
+          .then((devices) => {
+            renderDevices(devices);
+            sayBt(`Forgot ${m.name || m.address}. It's no longer paired with this PC.`);
+            refreshPaired();
+          })
+          .catch((e) => {
+            sayBt(String(e), true);
+            refreshPaired();
+          });
+      });
+      li.append(name);
+      if (m.n230) {
+        const badge = document.createElement("span");
+        badge.className = "bt-badge";
+        badge.textContent = "N230";
+        li.append(badge);
+      }
+      li.append(state, addr, forget);
+      return li;
+    })
+  );
+}
+
+function refreshPaired() {
+  invoke("bt_paired").then(renderPaired).catch((e) => console.error("bt_paired:", e));
 }
 
 function setScanning(on) {
@@ -429,7 +527,13 @@ function setScanning(on) {
 }
 
 function onBtEvent(ev) {
-  if (ev.type === "btAdapter") showAdapter(ev.state);
+  if (ev.type === "device" && ev.bus === "bluetooth") {
+    if (ev.connected && btJustPaired) {
+      btJustPaired = false;
+      sayBt("Connected. Try a side button.");
+    }
+    refreshPaired();
+  } else if (ev.type === "btAdapter") showAdapter(ev.state);
   else if (ev.type === "btScan") setScanning(ev.active);
   else if (ev.type === "btFound") {
     btFound.set(ev.address, ev);
@@ -439,6 +543,7 @@ function onBtEvent(ev) {
 
 function setupBluetooth() {
   invoke("bt_adapter").then(showAdapter).catch((e) => console.error("bt_adapter:", e));
+  refreshPaired();
   $("bt-search").addEventListener("click", () => {
     if (!btScanning) {
       btFound.clear();

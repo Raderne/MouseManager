@@ -32,6 +32,16 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - **Bug found by the user, fixed:** the Stop button did nothing. The "search ended" event came only from the watcher's WinRT `Stopped` event, but we drop our last reference to the watcher right after `Stop()`, and then Windows **sometimes never raises `Stopped`**. The UI stayed on "Stop" while Rust had no search left to stop. (Same cause as one `--scan` run that never ended.) Fix: `stop_watcher` sends `btScan {active:false}` itself; the `Stopped` handler only reports stops we didn't ask for (radio off), and only if its search is still current; `bt_scan(false)` with nothing running still sends `active:false`, so a stale button always recovers. The lock is released around `Start()` so a synchronous `Stopped` can't deadlock. Verified: 3 hand stops (end reported in ≤10 ms) + 1 auto-stop at 30.0 s.
   - Nearby non-mouse devices seen: `49:7D:07:E6:7D:BF`, `2C:92:FD:6D:3D:86`, `26:35:07:84:E7:C7` (no names).
 
+- **2026-11-07, B4 built on Windows** (`cargo test` 31 pass; hands-on check pending):
+  - `bt::pair(address)`: `BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync` (Random first, then Public) → `DeviceInformation.Pairing.Custom` with **ConfirmOnly** only, `ProtectionLevel::Default`; the `PairingRequested` handler accepts ConfirmOnly and nothing else, so a PIN request fails with "pair it in Windows settings" instead of being answered for the user. Any search is stopped first. On any failure a half-made pairing is undone (`UnpairAsync`). Then the **PnP ID** (`180A`/`2A50`) is read to get the link's VID/PID.
+  - `wait()` polls `IAsyncOperation.Status()` with a timeout and `Cancel()`s on expiry (pairing 30 s, lookups 10 s) instead of `.get()`, so a mouse that leaves pairing mode can't hang the app.
+  - `bt::forget(address)`: `UnpairAsync`; `bt::paired()`: `GetDeviceSelectorFromPairingState(true)` + `FindAllAsyncAqsFilter`, kept if appearance `0x03C2` or the name has "N230"; reports `connected`.
+  - Config: `remember_bluetooth(id, address, name)` sets bus/address/name on the entry matching the PnP VID/PID (adds one if none; a USB-only entry isn't reused). `forget_bluetooth(address)` clears only the address, so the VID/PID entry still remaps a later pairing.
+  - Commands `bt_pair`, `bt_forget`, `bt_paired` are `async` and use `spawn_blocking` (the UI stays live during pairing). `bt_pair` returns the device list + a status line.
+  - UI: **Pair** on every mouse in the search results; **Paired mice** list with Connected state and a two-click **Forget**. After pairing, the next `device {bluetooth, connected}` shows "Connected. Try a side button."
+  - New dependency **`windows-future` 0.2**: since `windows` 0.61, `IAsyncOperation`/`AsyncStatus` live there and aren't re-exported.
+  - `n230-control.exe --paired` lists paired mice (verified: `FE:46:E9:24:04:91` "Lenovo Services N230 BT1", connected).
+
 ## Idea
 
 Two layers, kept apart:

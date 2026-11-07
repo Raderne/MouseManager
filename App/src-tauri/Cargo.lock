@@ -2084,6 +2084,7 @@ dependencies = [
  "tauri-plugin-autostart",
  "tauri-plugin-single-instance",
  "windows 0.61.3",
+ "windows-future 0.2.1",
  "windows-sys 0.61.2",
 ]
 
