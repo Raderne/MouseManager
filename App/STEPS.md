@@ -233,7 +233,8 @@ If 0a said no, remove the battery UI completely. Don't show a fake value.
 - ✅ Monitor screen: buffered event list (1000-line cap, 100 ms redraw), "Show all devices" (`set_all_devices` command), Clear / Copy all.
 - ✅ Settings: Start-with-Windows (autostart plugin), start-minimized, low-battery-warning toggles; an editable VID:PID device list (`set_devices`, validated in Rust); `start_minimized` is now honored at launch (`.visible(!start_minimized)`).
 - ✅ `npm run check` passes; `main.js` passes `node --check`.
-- ⏳ **Not built:** this machine's Rust toolchain can't link (no `link.exe` and no Windows SDK / desktop CRT — VS 2026 is installed without the "Desktop development with C++" workload). `cargo test` is pending until that workload is installed. See the wiki's `Tauri Rewrite` → Build gotchas.
+- ✅ `cargo test` passes on Windows (18 tests), after installing the VS 2026 "Desktop development with C++" workload.
+- ⏳ Hands-on checks pending: settings survive a restart; Bluetooth/wired IDs captured and remapped.
 - Deferred with Phase 7: the settings-report hex and battery still show "—" (both need the HID feature-report plumbing from Spike 0a).
 
 ## Phase 9: Linux backend

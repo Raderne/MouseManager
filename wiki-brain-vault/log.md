@@ -56,3 +56,6 @@ Touched: Battery Reading
 
 ## [2026-11-07 13:40] session | Phase 8 Monitor + Settings built; Rust link blocked
 Touched: Tauri Rewrite
+
+## [2026-11-07 14:08] session | C++ workload installed; cargo test passes (18)
+Touched: Tauri Rewrite
