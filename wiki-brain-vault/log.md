@@ -80,3 +80,18 @@ Touched: N230 Hardware
 
 ## [2026-11-07 15:50] session | B0 closed, B1 device identity built
 Touched: Bluetooth Connection, N230 Hardware, Tauri Rewrite
+
+## [2026-11-07 16:00] session | B2 device-change handling built
+Touched: Bluetooth Connection
+
+## [2026-11-07 16:20] session | B2 done on Windows (hands-on)
+Touched: Bluetooth Connection
+
+## [2026-11-07 16:50] session | B3 Bluetooth search built (Windows)
+Touched: Bluetooth Connection
+
+## [2026-11-07 17:10] session | B3 Stop button bug fixed
+Touched: Bluetooth Connection
+
+## [2026-11-07 17:20] session | B3 done on Windows (hands-on)
+Touched: Bluetooth Connection

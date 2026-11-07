@@ -34,7 +34,7 @@ use windows_sys::Win32::{
     UI::{
         Input::{
             GetRawInputData, GetRawInputDeviceInfoW, RegisterRawInputDevices, HRAWINPUT, KeyboardAndMouse::*,
-            RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_INPUTSINK, RIDI_DEVICENAME, RID_INPUT, RIM_TYPEMOUSE,
+            RAWINPUT, RAWINPUTDEVICE, RAWINPUTHEADER, RIDEV_DEVNOTIFY, RIDEV_INPUTSINK, RIDI_DEVICENAME, RID_INPUT, RIM_TYPEMOUSE,
         },
         Shell::ShellExecuteW,
         WindowsAndMessaging::*,
@@ -66,8 +66,11 @@ pub fn start(config: Config, events: Sender<Event>) -> Handle {
     let (cmds, cmd_rx) = mpsc::channel();
     let (hwnd_tx, hwnd_rx) = mpsc::sync_channel(1);
     let thread_events = events.clone();
+    // The device list goes in at setup: Windows sends an arrival for every present mouse as soon as
+    // we register, before the first Apply is read, and those must already be matched.
+    let devices = config.devices.clone();
     let spawned = thread::Builder::new().name("n230-input".into()).spawn(move || unsafe {
-        match setup(thread_events.clone(), cmd_rx) {
+        match setup(thread_events.clone(), cmd_rx, devices) {
             Ok(hwnd) => {
                 let _ = hwnd_tx.send(hwnd as isize);
                 message_loop();
@@ -119,11 +122,16 @@ struct State {
     actions: [Action; 2],
     /// The decision made at button-down, reused at button-up. `None` = pass through.
     held: [Option<Action>; 2],
+    /// The raw device handle that pressed each held button, so its removal can release it.
+    held_dev: [isize; 2],
     devices: Vec<Device>,
-    /// Raw device handle → (path, is a configured device).
+    /// Raw device handle → (path, is a configured device). Entries are dropped on device arrival/removal:
+    /// a Bluetooth mouse gets a new handle after every sleep, and Windows may reuse an old one for another mouse.
     names: HashMap<isize, (String, bool)>,
     all_devices: bool,
     click_from_target: bool,
+    /// The device of the last raw click.
+    click_device: isize,
     move_from_target: bool,
     jobs: VecDeque<Job>,
     scale: f64,
@@ -150,7 +158,7 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain([0]).collect()
 }
 
-unsafe fn setup(events: Sender<Event>, cmds: Receiver<Cmd>) -> Result<HWND, String> {
+unsafe fn setup(events: Sender<Event>, cmds: Receiver<Cmd>, devices: Vec<Device>) -> Result<HWND, String> {
     unsafe {
         let inst = GetModuleHandleW(null());
         let class = wide("N230ControlInput");
@@ -164,7 +172,8 @@ unsafe fn setup(events: Sender<Event>, cmds: Receiver<Cmd>) -> Result<HWND, Stri
             return Err(format!("couldn't create the input window (error {})", GetLastError()));
         }
         // The only Raw Input registration in the process (one window per usage page per process).
-        let rid = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK, hwndTarget: hwnd };
+        // DEVNOTIFY: WM_INPUT_DEVICE_CHANGE on arrival/removal (Bluetooth sleep/wake, receiver unplugged).
+        let rid = RAWINPUTDEVICE { usUsagePage: 0x01, usUsage: 0x02, dwFlags: RIDEV_INPUTSINK | RIDEV_DEVNOTIFY, hwndTarget: hwnd };
         if RegisterRawInputDevices(&rid, 1, size_of::<RAWINPUTDEVICE>() as u32) == 0 {
             return Err(format!("couldn't register for raw mouse input (error {})", GetLastError()));
         }
@@ -178,10 +187,12 @@ unsafe fn setup(events: Sender<Event>, cmds: Receiver<Cmd>) -> Result<HWND, Stri
                 cmds,
                 actions: [Action::PassThrough, Action::PassThrough],
                 held: [None, None],
-                devices: Vec::new(),
+                held_dev: [0, 0],
+                devices,
                 names: HashMap::new(),
                 all_devices: false,
                 click_from_target: false,
+                click_device: 0,
                 move_from_target: false,
                 jobs: VecDeque::new(),
                 scale: 1.0,
@@ -223,6 +234,10 @@ unsafe extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: 
     unsafe {
         match msg {
             WM_INPUT => on_raw_input(lparam), // then DefWindowProc, which frees the raw input
+            WM_INPUT_DEVICE_CHANGE => {
+                on_device_change(wparam as u32 == GIDC_ARRIVAL, lparam);
+                return 0;
+            }
             WM_WAKE => {
                 on_wake();
                 return 0;
@@ -269,6 +284,7 @@ unsafe fn hook_decides(msg: u32, mouse_data: u32) -> bool {
                     with(|s| {
                         let a = &s.actions[i];
                         s.held[i] = (s.click_from_target && *a != Action::PassThrough).then(|| a.clone());
+                        s.held_dev[i] = s.click_device;
                     });
                 }
                 // The up gets exactly the down's decision.
@@ -357,6 +373,7 @@ unsafe fn on_raw_input(lparam: LPARAM) {
             }
             if flags & RI_BUTTON_MASK != 0 {
                 s.click_from_target = target;
+                s.click_device = device;
                 if target || s.all_devices {
                     for (button, down) in button_changes(flags) {
                         let _ = s.events.send(Event::Button { device: path.clone(), target, button: button.into(), down });
@@ -381,6 +398,39 @@ unsafe fn device_name(device: isize) -> String {
         }
         String::from_utf16_lossy(&buf).trim_end_matches('\0').to_string()
     }
+}
+
+/// A mouse arrived or left. Forget its cached decision (handles get reused), and if it left while
+/// holding a remapped button, release that action: the button-up will never come.
+unsafe fn on_device_change(arrival: bool, lparam: LPARAM) {
+    unsafe {
+        let device = lparam as isize;
+        let path = if arrival { device_name(device) } else { String::new() };
+        let release = with(|s| {
+            let gone = s.names.remove(&device);
+            let (path, target) = if arrival {
+                let target = matches_device(&path, &s.devices);
+                s.names.insert(device, (path.clone(), target));
+                (path, target)
+            } else {
+                gone.unwrap_or_default()
+            };
+            if target {
+                let bus = DeviceId::from_windows_path(&path).map(|id| id.bus);
+                let _ = s.events.send(Event::Device { bus, connected: arrival, permission: true });
+            }
+            if arrival { Vec::new() } else { release_held(&mut s.held, &s.held_dev, device) }
+        })
+        .unwrap_or_default();
+        for a in release {
+            queue(Job::Act(a, false));
+        }
+    }
+}
+
+/// The held actions pressed by `device`, taken out of `held` so their button-up is never applied twice.
+fn release_held(held: &mut [Option<Action>; 2], held_dev: &[isize; 2], device: isize) -> Vec<Action> {
+    (0..2).filter(|&i| held_dev[i] == device).filter_map(|i| held[i].take()).collect()
 }
 
 /// True if a Raw Input device path belongs to one of the configured devices.
@@ -627,6 +677,19 @@ mod tests {
         assert!(matches_device(n230_bt, &Config::default().devices));
         assert!(!matches_device(n230_bt, &n230));
         assert!(!matches_device(n230_bt, &[Device::new("25A7", "FAA2", Some(Bus::Usb))]), "bus must agree when set");
+    }
+
+    #[test]
+    fn removal_releases_only_that_devices_buttons() {
+        let ctrl = Action::Keys(vec![Key::Ctrl]);
+        let mut held = [Some(ctrl.clone()), Some(Action::Disabled)];
+        let held_dev = [7, 9];
+        assert!(release_held(&mut held, &held_dev, 3).is_empty(), "another mouse left: nothing released");
+        assert_eq!(release_held(&mut held, &held_dev, 7), [ctrl]);
+        assert_eq!(held, [None, Some(Action::Disabled)], "X2 from the other device stays held");
+        assert!(release_held(&mut held, &held_dev, 7).is_empty(), "never released twice");
+        let mut idle = [None, None];
+        assert!(release_held(&mut idle, &[7, 7], 7).is_empty(), "pass-through clicks hold nothing");
     }
 
     // Ports of the raw-input checks in SelfTest() (Monitor/Program.cs).

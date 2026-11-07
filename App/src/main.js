@@ -157,6 +157,9 @@ function fmtEvent(ev) {
     case "settings": return `N230  settings report ${ev.hex}`;
     case "device": return `device ${ev.bus ? ev.bus + " " : ""}${ev.connected ? "connected" : "disconnected"}${ev.permission ? "" : " (no permission)"}`;
     case "link": return `link  ${ev.bus} ${ev.state}${ev.address ? " " + ev.address : ""}`;
+    case "btAdapter": return `bluetooth adapter ${ev.state}`;
+    case "btScan": return `bluetooth search ${ev.active ? "started" : "ended"}`;
+    case "btFound": return `bluetooth found ${ev.name || "(no name)"} ${ev.address} ${ev.rssi} dBm${ev.n230 ? " [N230]" : ""}`;
     case "error": return `error  ${ev.message}`;
     case "battery": return `battery ${ev.percent ?? "—"}`;
     default: return JSON.stringify(ev);
@@ -192,6 +195,10 @@ $("monitor-copy").addEventListener("click", () =>
 );
 
 listen("n230", ({ payload: ev }) => {
+  if (ev.type.startsWith("bt")) {
+    onBtEvent(ev);
+    if (ev.type === "btFound" && !ev.mouse && !$("all-devices").checked) return; // keep the monitor about mice
+  }
   addEventLine(ev);
   if (measuring && ev.type === "move" && ev.target) meter.move(ev.dx, ev.dy, performance.now());
 });
@@ -348,4 +355,103 @@ function setupSettings(config) {
   );
 
   $("device-add").addEventListener("click", () => $("devices").appendChild(deviceRow({ vid: "", pid: "" })));
+  setupBluetooth();
+}
+
+// Bluetooth search (B3). Rust decides what a device is (mouse, n230, bars); JS only shows it.
+const btFound = new Map(); // address → last btFound event
+let btScanning = false;
+
+const ADAPTER_TEXT = {
+  on: "Bluetooth is on.",
+  off: "Bluetooth is off. Turn it on in the Windows settings to search.",
+  missing: "No Bluetooth LE adapter found on this PC.",
+};
+
+function showAdapter(state) {
+  $("bt-adapter").textContent = ADAPTER_TEXT[state] ?? "—";
+  $("bt-settings").hidden = state !== "off";
+  $("bt-search").disabled = state !== "on" && !btScanning;
+}
+
+function renderBtFound() {
+  const all = $("bt-all").checked;
+  const list = [...btFound.values()]
+    .filter((d) => d.mouse || all)
+    .sort((a, b) => b.n230 - a.n230 || b.rssi - a.rssi);
+  $("bt-found").replaceChildren(
+    ...list.map((d) => {
+      const li = document.createElement("li");
+      li.className = "bt-item" + (d.n230 ? " n230" : "");
+      const name = document.createElement("span");
+      name.className = "bt-name";
+      name.textContent = d.name || "Unnamed device";
+      li.append(name);
+      if (d.n230) {
+        const badge = document.createElement("span");
+        badge.className = "bt-badge";
+        badge.textContent = "N230";
+        li.append(badge);
+      }
+      const addr = document.createElement("span");
+      addr.className = "bt-addr mono";
+      addr.textContent = d.address;
+      const bars = document.createElement("span");
+      bars.className = "bt-bars";
+      bars.setAttribute("role", "img");
+      bars.setAttribute("aria-label", `Signal ${d.bars} of 4`);
+      for (let i = 1; i <= 4; i++) {
+        const b = document.createElement("span");
+        if (i <= d.bars) b.className = "on";
+        bars.append(b);
+      }
+      li.append(addr, bars);
+      return li;
+    })
+  );
+  return list;
+}
+
+function setScanning(on) {
+  btScanning = on;
+  $("bt-search").textContent = on ? "Stop" : "Search for mouse";
+  $("bt-search").disabled = false;
+  if (on) {
+    $("bt-status").classList.remove("error");
+    $("bt-status").textContent = "Searching…";
+  } else {
+    const mice = [...btFound.values()].filter((d) => d.mouse);
+    $("bt-status").classList.toggle("error", mice.length === 0);
+    $("bt-status").textContent = mice.length
+      ? `Search finished: ${mice.length} ${mice.length === 1 ? "mouse" : "mice"} found.`
+      : "No mouse found. Is the N230 in pairing mode?";
+  }
+}
+
+function onBtEvent(ev) {
+  if (ev.type === "btAdapter") showAdapter(ev.state);
+  else if (ev.type === "btScan") setScanning(ev.active);
+  else if (ev.type === "btFound") {
+    btFound.set(ev.address, ev);
+    renderBtFound();
+  }
+}
+
+function setupBluetooth() {
+  invoke("bt_adapter").then(showAdapter).catch((e) => console.error("bt_adapter:", e));
+  $("bt-search").addEventListener("click", () => {
+    if (!btScanning) {
+      btFound.clear();
+      renderBtFound();
+    }
+    invoke("bt_scan", { on: !btScanning }).catch((e) => {
+      $("bt-status").classList.add("error");
+      $("bt-status").textContent = String(e);
+      invoke("bt_adapter").then(showAdapter);
+    });
+  });
+  $("bt-settings").addEventListener("click", () => invoke("bt_open_settings").catch((e) => console.error(e)));
+  $("bt-all").addEventListener("change", renderBtFound);
+  // The adapter can be switched on in Windows while this window is open.
+  window.addEventListener("focus", () => invoke("bt_adapter").then(showAdapter).catch(() => {}));
 }

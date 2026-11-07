@@ -278,6 +278,22 @@ input[type="text"] { font-family: "JetBrains Mono", monospace; user-select: text
 .device-row input { width: 92px; font-family: "JetBrains Mono", monospace; text-transform: uppercase; }
 .device-row .sep { color: var(--muted); font-weight: 700; }
 .device-row .device-tag { color: var(--muted); font-size: 12px; flex: 1; }
+
+/* Bluetooth search results */
+.bt-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.bt-list:empty { display: none; }
+.bt-item { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--panel2); border: 1px solid var(--line); border-radius: 12px; }
+.bt-item.n230 { border-color: var(--accent); }
+.bt-item .bt-name { font-weight: 600; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bt-item .bt-addr { color: var(--muted); font-size: 12px; }
+.bt-badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; background: var(--accent); color: var(--on-accent); }
+.bt-bars { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; }
+.bt-bars span { width: 3px; background: var(--line); border-radius: 1px; }
+.bt-bars span:nth-child(1) { height: 25%; }
+.bt-bars span:nth-child(2) { height: 50%; }
+.bt-bars span:nth-child(3) { height: 75%; }
+.bt-bars span:nth-child(4) { height: 100%; }
+.bt-bars span.on { background: var(--accent); }
 .device-actions { display: flex; gap: 8px; }
 
 /* Secondary button */

@@ -33,6 +33,15 @@ panic = "abort"
 strip = true
 
 [target.'cfg(windows)'.dependencies]
+# WinRT Bluetooth (search, adapter state). windows-sys has no WinRT.
+windows = { version = "0.61", features = [
+  "Devices_Bluetooth",
+  "Devices_Bluetooth_Advertisement",
+  "Devices_Radios",
+  "Foundation",
+  "Foundation_Collections",
+  "Storage_Streams",
+] }
 windows-sys = { version = "0.61", features = [
   "Win32_Foundation",
   "Win32_System_Com",

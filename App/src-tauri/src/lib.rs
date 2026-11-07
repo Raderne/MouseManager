@@ -1,4 +1,5 @@
 pub mod action;
+pub mod bt;
 pub mod config;
 pub mod device;
 pub mod event;
@@ -24,6 +25,25 @@ struct AppState {
     config: Mutex<Config>,
     path: PathBuf,
     backend: platform::Handle,
+    bt: bt::BtHandle,
+}
+
+/// Bluetooth adapter: "on", "off" or "missing".
+#[tauri::command]
+fn bt_adapter(state: State<AppState>) -> bt::AdapterState {
+    state.bt.adapter()
+}
+
+/// Start or stop searching. Results arrive as `btFound` events; `btScan` says when it starts and ends.
+#[tauri::command]
+fn bt_scan(on: bool, state: State<AppState>) -> Result<(), String> {
+    state.bt.scan(on)
+}
+
+/// Opens the OS Bluetooth settings (to switch the radio on: the app never does that itself).
+#[tauri::command]
+fn bt_open_settings(state: State<AppState>) -> Result<(), String> {
+    state.bt.open_settings()
 }
 
 #[tauri::command]
@@ -80,6 +100,33 @@ pub fn log(seconds: u64) {
             Event::Move { target: true, dx, dy } => println!("{t:8.3} [N230 ] move {dx:+} {dy:+}"),
             Event::Move { .. } => {}
             other => println!("{t:8.3} {other:?}"),
+        }
+    }
+}
+
+/// `--scan [stop_after_secs]`: one Bluetooth search (B3), printing every device it reports. With a number,
+/// it's stopped by hand after that long (the Stop button's path); without, it runs until the 30 s auto-stop.
+/// Like `--log`, debug builds only have a console.
+pub fn scan(stop_after: Option<u64>) {
+    let (tx, rx) = mpsc::channel();
+    let bt = bt::start(tx);
+    println!("Bluetooth adapter: {:?}", bt.adapter());
+    if let Err(e) = bt.scan(true) {
+        println!("{e}");
+        return;
+    }
+    let start = Instant::now();
+    if let Some(secs) = stop_after {
+        thread::spawn(move || {
+            thread::sleep(Duration::from_secs(secs));
+            println!("{secs:7}.000 stopping by hand");
+            let _ = bt.scan(false);
+        });
+    }
+    for ev in rx {
+        println!("{:7.3} {ev:?}", start.elapsed().as_secs_f64());
+        if ev == (Event::BtScan { active: false }) {
+            break;
         }
     }
 }
@@ -179,7 +226,10 @@ pub fn run() {
             set_start_minimized,
             set_low_battery_warning,
             get_autostart,
-            set_autostart
+            set_autostart,
+            bt_adapter,
+            bt_scan,
+            bt_open_settings
         ])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");
@@ -195,6 +245,7 @@ pub fn run() {
 
             // Backend events go to the UI on one channel, "n230", as {"type": …, …}.
             let (tx, rx) = mpsc::channel();
+            let bt = bt::start(tx.clone());
             let backend = platform::start(config.clone(), tx);
             backend.set_scale(config.scale());
             let handle = app.handle().clone();
@@ -203,7 +254,7 @@ pub fn run() {
                     let _ = handle.emit("n230", ev);
                 }
             });
-            app.manage(AppState { config: Mutex::new(config), path, backend });
+            app.manage(AppState { config: Mutex::new(config), path, backend, bt });
 
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
