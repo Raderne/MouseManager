@@ -82,6 +82,8 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
   - The settings-report hex and battery are deferred with Phase 7 (both need the HID feature-report plumbing).
   - `npm run check` passes and `cargo test` passes on Windows (18 tests) after the VS 2026 "Desktop development with C++" workload was installed.
 
+- 2026-11-07: **Phase 9 Linux backend not started** — blocked on hardware: no Linux here (no WSL, and only the `x86_64-pc-windows-msvc` stdlib is installed). Needs a real Linux box for both compilation and the X11/Wayland + `kill -9` checks. See [[Linux Input Backend]].
+
 ## Commands (Rust ↔ UI)
 
 | Command | What |
