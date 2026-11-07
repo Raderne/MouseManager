@@ -155,7 +155,8 @@ function fmtEvent(ev) {
   switch (ev.type) {
     case "button": return `${ev.target ? "N230 " : "other"} ${ev.button}-${ev.down ? "down" : "up"}  ${ev.device || ""}`;
     case "settings": return `N230  settings report ${ev.hex}`;
-    case "device": return `device ${ev.connected ? "connected" : "disconnected"}${ev.permission ? "" : " (no permission)"}`;
+    case "device": return `device ${ev.bus ? ev.bus + " " : ""}${ev.connected ? "connected" : "disconnected"}${ev.permission ? "" : " (no permission)"}`;
+    case "link": return `link  ${ev.bus} ${ev.state}${ev.address ? " " + ev.address : ""}`;
     case "error": return `error  ${ev.message}`;
     case "battery": return `battery ${ev.percent ?? "—"}`;
     default: return JSON.stringify(ev);
@@ -237,6 +238,8 @@ for (const radio of document.querySelectorAll('input[name="theme"]')) {
 // Settings: general toggles and the device list.
 const validId = (s) => /^[0-9A-Fa-f]{4}$/.test(s);
 let devices = []; // last successfully saved list
+// bus / address / name of each row, kept so editing VID:PID doesn't drop them. Rust validates and owns their meaning.
+const rowExtra = new WeakMap();
 
 const sayDevices = (text, error = false) => {
   const el = $("devices-status");
@@ -274,12 +277,22 @@ function deviceRow(d) {
     commitDevices(readDevices());
   });
   for (const input of [vid, pid]) input.addEventListener("change", () => commitDevices(readDevices()));
-  row.append(vid, sep, pid, del);
+  const { vid: _v, pid: _p, ...extra } = d;
+  rowExtra.set(row, extra);
+  row.append(vid, sep, pid);
+  if (d.name || d.bus) {
+    const tag = document.createElement("span");
+    tag.className = "device-tag";
+    tag.textContent = d.name || (d.bus === "bluetooth" ? "Bluetooth" : "USB");
+    row.append(tag);
+  }
+  row.append(del);
   return row;
 }
 
 function readDevices() {
   return [...$("devices").querySelectorAll(".device-row")].map((row) => ({
+    ...rowExtra.get(row),
     vid: row.querySelector(".vid").value.trim().toUpperCase(),
     pid: row.querySelector(".pid").value.trim().toUpperCase(),
   }));

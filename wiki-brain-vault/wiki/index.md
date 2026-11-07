@@ -19,6 +19,7 @@ Catalogue of every page in this wiki. Maintained by Claude.
 - [[Linux Input Backend]]: take exclusive control of the N230 (evdev grab) and re-send through a virtual uinput device; udev permissions.
 - [[DPI Measurement]]: DPI from counts ÷ inches, the short-slide bug, and software DPI scaling.
 - [[Battery Reading]]: open question; the `0x64` byte in report 6 is the lead.
+- [[Bluetooth Connection]]: planned phases B0–B9 to find, pair and remap the N230 over Bluetooth, and read battery/link state.
 - [[Design System]]: Pulse layout, 5 color themes as CSS variables, and the design canvas link.
 
 ## Decisions
@@ -27,7 +28,7 @@ Catalogue of every page in this wiki. Maintained by Claude.
 
 ## Sources
 
-_(summaries of sources ingested from `raw/`: none yet)_
+- `raw/bluetooth-phases-plan.md` → [[Bluetooth Connection]]: the Bluetooth phases plan (2026-11-07).
 
 ## Analyses / known gotchas
 

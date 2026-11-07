@@ -1,5 +1,6 @@
 //! Events from the platform backend to the UI. Sent on one Tauri channel as `{ "type": …, … }`.
 
+use crate::device::Bus;
 use serde::Serialize;
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -13,8 +14,22 @@ pub enum Event {
     Battery { percent: Option<u8> },
     /// The raw settings feature report, as hex.
     Settings { hex: String },
-    Device { connected: bool, permission: bool },
+    /// `bus`: which link this is about; `None` when it isn't known.
+    Device { bus: Option<Bus>, connected: bool, permission: bool },
+    /// Bluetooth connection state for the connect flow (phases B3–B5). `address` is `None` until known.
+    Link { bus: Bus, state: LinkState, address: Option<String> },
     Error { message: String },
+}
+
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LinkState {
+    Searching,
+    Pairing,
+    Connected,
+    /// Paired, but the mouse dropped the link to save power; a click wakes it.
+    Sleeping,
+    Disconnected,
 }
 
 #[cfg(test)]
@@ -32,6 +47,14 @@ mod tests {
         assert_eq!(
             serde_json::to_value(Event::Battery { percent: None }).unwrap(),
             json!({ "type": "battery", "percent": null })
+        );
+        assert_eq!(
+            serde_json::to_value(Event::Device { bus: Some(Bus::Bluetooth), connected: true, permission: true }).unwrap(),
+            json!({ "type": "device", "bus": "bluetooth", "connected": true, "permission": true })
+        );
+        assert_eq!(
+            serde_json::to_value(Event::Link { bus: Bus::Bluetooth, state: LinkState::Sleeping, address: None }).unwrap(),
+            json!({ "type": "link", "bus": "bluetooth", "state": "sleeping", "address": null })
         );
     }
 }

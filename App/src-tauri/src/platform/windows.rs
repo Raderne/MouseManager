@@ -11,8 +11,11 @@
 use crate::{
     action::{self, Action, Btn, Key},
     config::{Config, Device},
+    device::DeviceId,
     event::Event,
 };
+#[cfg(test)]
+use crate::device::Bus;
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -381,22 +384,9 @@ unsafe fn device_name(device: isize) -> String {
 }
 
 /// True if a Raw Input device path belongs to one of the configured devices.
-/// USB: `…VID_3554&PID_FC01…`. Bluetooth: `…_VID&0002046d_PID&b01a…` or `…_VID&02046d_PID&b023…`.
+/// Path parsing lives in `DeviceId::from_windows_path` (USB and both Bluetooth forms).
 pub fn matches_device(path: &str, devices: &[Device]) -> bool {
-    let p = path.to_ascii_uppercase();
-    devices.iter().any(|d| {
-        let (vid, pid) = (d.vid.to_ascii_uppercase(), d.pid.to_ascii_uppercase());
-        let hex4 = |s: &str| s.len() == 4 && s.bytes().all(|b| b.is_ascii_hexdigit());
-        if !hex4(&vid) || !hex4(&pid) {
-            return false; // a blank or bad entry must never match every mouse
-        }
-        p.contains(&format!("VID_{vid}&PID_{pid}"))
-            || p.match_indices("VID&").any(|(i, _)| {
-                let rest = &p[i + 4..];
-                let end = rest.find('_').unwrap_or(rest.len());
-                rest[..end].ends_with(&vid) && rest[end..].starts_with(&format!("_PID&{pid}"))
-            })
-    })
+    DeviceId::from_windows_path(path).is_some_and(|id| devices.iter().any(|d| d.matches(&id)))
 }
 
 unsafe fn on_wake() {
@@ -616,7 +606,7 @@ mod tests {
     use super::*;
 
     fn dev(vid: &str, pid: &str) -> Device {
-        Device { vid: vid.into(), pid: pid.into() }
+        Device::new(vid, pid, None)
     }
 
     #[test]
@@ -632,6 +622,11 @@ mod tests {
         for bad in [dev("", ""), dev("35", "FC01"), dev("3554", "FC0"), dev("xyz1", "FC01")] {
             assert!(!matches_device(r"\\?\HID#VID_3554&PID_FC01&Col01", &[bad.clone()]), "{bad:?} must match nothing");
         }
+        // The real N230 over Bluetooth LE (B0) is remapped by the default config; the receiver's entry alone doesn't take it.
+        let n230_bt = r"\\?\HID#{00001812-0000-1000-8000-00805f9b34fb}_Dev_VID&0225a7_PID&faa2_REV&0508_fe46e9240491&Col02#9&39f0bed3&0&0001#{378de44c-56ef-11d1-bc8c-00a0c91405dd}";
+        assert!(matches_device(n230_bt, &Config::default().devices));
+        assert!(!matches_device(n230_bt, &n230));
+        assert!(!matches_device(n230_bt, &[Device::new("25A7", "FAA2", Some(Bus::Usb))]), "bus must agree when set");
     }
 
     // Ports of the raw-input checks in SelfTest() (Monitor/Program.cs).

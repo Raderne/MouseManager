@@ -41,7 +41,7 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
   "theme": "pulse", "startMinimized": true, "lowBatteryWarning": true }
 ```
 
-- Devices are stored as **VID/PID**, not Windows path text, so one config works on both systems.
+- Devices are stored as **VID/PID**, not Windows path text, so one config works on both systems. Since B1 each device may also have `bus` (`usb`/`bluetooth`), `address` and `name`; the default list holds the receiver and the Bluetooth mouse. See [[Bluetooth Connection]].
 - Mapping syntax is the same as [[Monitor App]]. Each OS module translates the shared key names (Windows VK codes, Linux `KEY_*`).
 - Mapping text is parsed **only in Rust**, never in JS.
 
@@ -57,6 +57,7 @@ JSON in Tauri's `app_config_dir()`, owned by Rust with serde, using defaults for
 7. Battery ([[Battery Reading]])
 8. Monitor and Settings screens
 9. Linux backend
+- Bluetooth phases **B0–B9** ([[Bluetooth Connection]]) slot in before Phase 10; the Linux parts need Phase 9.
 10. Packaging (NSIS installer; `.deb`/`.rpm` with the udev rule; AppImage), then retire `Monitor/`
 
 ## Status

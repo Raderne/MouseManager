@@ -1,5 +1,6 @@
 pub mod action;
 pub mod config;
+pub mod device;
 pub mod event;
 pub mod platform;
 

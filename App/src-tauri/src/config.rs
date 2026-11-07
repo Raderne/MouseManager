@@ -1,3 +1,4 @@
+use crate::device::{Bus, DeviceId};
 use serde::{Deserialize, Serialize};
 use std::{fs, path::Path};
 
@@ -47,10 +48,40 @@ pub struct Config {
     pub target_dpi: Option<u32>,
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+/// A device to remap. Matching uses VID/PID and, if set, the bus; `address` and `name` never affect matching.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct Device {
     pub vid: String,
     pub pid: String,
+    /// `None` = any bus (configs from before Bluetooth support).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bus: Option<Bus>,
+    /// Bluetooth address, only for reconnecting or forgetting this exact mouse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub address: Option<String>,
+    /// Display only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+}
+
+impl Device {
+    pub fn new(vid: &str, pid: &str, bus: Option<Bus>) -> Self {
+        Self { vid: vid.into(), pid: pid.into(), bus, ..Default::default() }
+    }
+
+    /// A bad VID/PID never matches anything (so a blank entry can't remap every mouse).
+    pub fn matches(&self, id: &DeviceId) -> bool {
+        let parse = |s: &str| valid_id(s).then(|| u16::from_str_radix(s, 16).ok()).flatten();
+        parse(&self.vid) == Some(id.vid) && parse(&self.pid) == Some(id.pid) && self.bus.is_none_or(|b| b == id.bus)
+    }
+}
+
+/// The N230's IDs: the 2.4G receiver, and the mouse itself over Bluetooth LE (both measured, see the wiki's N230 Hardware).
+fn default_devices() -> Vec<Device> {
+    vec![
+        Device { name: Some("N230 receiver".into()), ..Device::new("3554", "FC01", Some(Bus::Usb)) },
+        Device { name: Some("N230 Bluetooth".into()), ..Device::new("25A7", "FAA2", Some(Bus::Bluetooth)) },
+    ]
 }
 
 /// Mapping text per side button, parsed by `action::parse_buttons`.
@@ -72,7 +103,7 @@ impl Default for Buttons {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            devices: vec![Device { vid: "3554".into(), pid: "FC01".into() }], // the 2.4G receiver
+            devices: default_devices(),
             buttons: Buttons::default(),
             theme: THEMES[0].0.into(),
             start_minimized: true,
@@ -101,6 +132,11 @@ impl Config {
             .unwrap_or_default();
         if !is_theme(&c.theme) {
             c.theme = Self::default().theme;
+        }
+        // A list saved before Bluetooth support is exactly the old default (the receiver, no bus).
+        // Upgrade it to the new default; a list the user edited since then is left alone.
+        if c.devices == [Device::new("3554", "FC01", None)] {
+            c.devices = default_devices();
         }
         c
     }
@@ -181,6 +217,37 @@ mod tests {
     }
 
     #[test]
+    fn device_matching() {
+        let usb = DeviceId { bus: Bus::Usb, vid: 0x3554, pid: 0xFC01 };
+        let bt = DeviceId { bus: Bus::Bluetooth, vid: 0x25A7, pid: 0xFAA2 };
+        assert!(Device::new("3554", "fc01", None).matches(&usb), "case-insensitive");
+        assert!(Device::new("25A7", "FAA2", None).matches(&bt), "no bus = any bus");
+        assert!(Device::new("25A7", "FAA2", Some(Bus::Bluetooth)).matches(&bt));
+        assert!(!Device::new("25A7", "FAA2", Some(Bus::Usb)).matches(&bt), "USB-only entry must not match the BT mouse");
+        assert!(!Device::new("25A7", "FAA3", None).matches(&bt), "other PID");
+        let addr = Device { address: Some("00:00:00:00:00:00".into()), ..Device::new("25A7", "FAA2", None) };
+        assert!(addr.matches(&bt), "the address never affects matching");
+        for bad in [Device::new("", "", None), Device::new("25A", "FAA2", None), Device::new("25A7x", "FAA2", None)] {
+            assert!(!bad.matches(&bt), "{bad:?} must match nothing");
+        }
+        assert!(Config::default().devices.iter().any(|d| d.matches(&usb)) && Config::default().devices.iter().any(|d| d.matches(&bt)));
+    }
+
+    #[test]
+    fn old_device_list_upgrades() {
+        let path = std::env::temp_dir().join(format!("n230-config-upgrade-{}.json", std::process::id()));
+        fs::write(&path, r#"{"devices":[{"vid":"3554","pid":"FC01"}]}"#).unwrap();
+        assert_eq!(Config::load(&path).devices, Config::default().devices, "the old default gains the Bluetooth entry");
+        fs::write(&path, r#"{"devices":[{"vid":"3554","pid":"FC01","bus":"usb"}]}"#).unwrap();
+        assert_eq!(Config::load(&path).devices.len(), 1, "a list the user trimmed stays trimmed");
+        fs::write(&path, r#"{"devices":[{"vid":"3554","pid":"FC01"},{"vid":"17EF","pid":"6060"}]}"#).unwrap();
+        assert_eq!(Config::load(&path).devices.len(), 2, "an edited list is left alone");
+        fs::write(&path, r#"{"devices":[]}"#).unwrap();
+        assert!(Config::load(&path).devices.is_empty(), "an emptied list stays empty");
+        fs::remove_file(&path).unwrap();
+    }
+
+    #[test]
     fn dpi_scale() {
         let c = |m, t| Config { measured_dpi: m, target_dpi: t, ..Config::default() }.scale();
         assert!((c(Some(1424.0), Some(800)) - 0.5618).abs() < 1e-3, "800 stage ≈ 56%");
@@ -194,7 +261,10 @@ mod tests {
     fn config_round_trip_and_defaults() {
         let path = std::env::temp_dir().join(format!("n230-config-test-{}.json", std::process::id()));
         let c = Config {
-            devices: vec![Device { vid: "3554".into(), pid: "FC01".into() }, Device { vid: "17EF".into(), pid: "6060".into() }],
+            devices: vec![
+                Device::new("3554", "FC01", None),
+                Device { address: Some("FE:46:E9:24:04:91".into()), name: Some("N230 BT1".into()), ..Device::new("25A7", "FAA2", Some(Bus::Bluetooth)) },
+            ],
             buttons: Buttons { x1: "Back".into(), x2: "Ctrl+Shift+T".into() },
             theme: "ember".into(),
             start_minimized: false,
@@ -209,6 +279,9 @@ mod tests {
         let json: serde_json::Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
         assert_eq!(json["buttons"]["X2"], "Ctrl+Shift+T");
         assert_eq!(json["devices"][0]["vid"], "3554");
+        assert_eq!(json["devices"][0].as_object().unwrap().len(), 2, "unset bus/address/name are left out of the file");
+        assert_eq!(json["devices"][1]["bus"], "bluetooth");
+        assert_eq!(json["devices"][1]["address"], "FE:46:E9:24:04:91");
         assert_eq!(json["startMinimized"], false);
         assert_eq!(json["lowBatteryWarning"], false);
 

@@ -62,3 +62,21 @@ Touched: Tauri Rewrite
 
 ## [2026-11-07 14:12] session | Phase 9 blocked on Linux hardware; stopped
 Touched: Tauri Rewrite
+
+## [2026-11-07 14:40] ingest | raw/bluetooth-phases-plan.md
+Touched: Bluetooth Connection, index
+
+## [2026-11-07 14:40] session | Bluetooth connection phases plan written
+Touched: Bluetooth Connection, N230 Hardware, Tauri Rewrite, index
+
+## [2026-11-07 15:00] session | B0 spike: N230 found over BLE
+Touched: N230 Hardware
+
+## [2026-11-07 15:20] session | B0: N230 BLE GATT, PnP ID, battery 83%
+Touched: N230 Hardware, Battery Reading
+
+## [2026-11-07 15:30] session | B0: N230 paired over BLE, paths and battery
+Touched: N230 Hardware
+
+## [2026-11-07 15:50] session | B0 closed, B1 device identity built
+Touched: Bluetooth Connection, N230 Hardware, Tauri Rewrite

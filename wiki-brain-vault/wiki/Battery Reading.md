@@ -2,6 +2,12 @@
 
 **Status: open question.** It's not yet known whether the PC can read the N230's battery level.
 
+## Bluetooth answers it (2026-11-07)
+
+Over Bluetooth LE the N230 exposes the **standard Battery Service** (`0x180F` / `0x2A19`, Read + Notify). It read **83%**. See [[N230 Hardware]] → Bluetooth and [[Bluetooth Connection]] phase B6.
+
+**Evidence against the report-6 hypothesis:** the dongle's report 6 byte 5 has stayed `0x64` = 100 on every read, including 12:16–12:18 today, while the same mouse reports 83% over Bluetooth. The hourly task's 15:18 read (`06000200EC648779`) still had byte 5 = 100, a few minutes after Bluetooth said 83%. So **byte 5 is very likely not the battery %**. Caveat: the mouse was in Bluetooth mode, so the dongle may have been answering from a stale cache. Byte 4 keeps creeping up (`EA` 10-19 → `EB` → `EC` at 15:18), which looks like a slow counter, not charge.
+
 ## Lead
 
 Feature report 6 on collection `0xFF02` ([[N230 Hardware]]) read `06 00 02 00 EA 64 87 79` on 2026-10-19. Byte 5 is **`0x64` = 100**, which may be the battery %. The mouse was likely charged at the time.

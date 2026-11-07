@@ -277,6 +277,7 @@ input[type="text"] { font-family: "JetBrains Mono", monospace; user-select: text
 .device-row { display: flex; align-items: center; gap: 8px; }
 .device-row input { width: 92px; font-family: "JetBrains Mono", monospace; text-transform: uppercase; }
 .device-row .sep { color: var(--muted); font-weight: 700; }
+.device-row .device-tag { color: var(--muted); font-size: 12px; flex: 1; }
 .device-actions { display: flex; gap: 8px; }
 
 /* Secondary button */
