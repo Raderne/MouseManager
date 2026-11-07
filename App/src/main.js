@@ -157,6 +157,7 @@ function fmtEvent(ev) {
     case "settings": return `N230  settings report ${ev.hex}`;
     case "device": return `device ${ev.bus ? ev.bus + " " : ""}${ev.connected ? "connected" : "disconnected"}${ev.permission ? "" : " (no permission)"}`;
     case "link": return `link  ${ev.bus} ${ev.state}${ev.address ? " " + ev.address : ""}`;
+    case "active": return `N230  now using ${ev.bus === "bluetooth" ? "Bluetooth" : "the USB receiver"}`;
     case "btAdapter": return `bluetooth adapter ${ev.state}`;
     case "btScan": return `bluetooth search ${ev.active ? "started" : "ended"}`;
     case "btFound": return `bluetooth found ${ev.name || "(no name)"} ${ev.address} ${ev.rssi} dBm${ev.n230 ? " [N230]" : ""}`;
@@ -195,7 +196,7 @@ $("monitor-copy").addEventListener("click", () =>
 );
 
 listen("n230", ({ payload: ev }) => {
-  if (ev.type.startsWith("bt") || ev.type === "device") {
+  if (ev.type.startsWith("bt") || ["device", "link", "active"].includes(ev.type)) {
     onBtEvent(ev);
     if (ev.type === "btFound" && !ev.mouse && !$("all-devices").checked) return; // keep the monitor about mice
   }
@@ -449,7 +450,18 @@ function pairMouse(d) {
     });
 }
 
+const linkStates = new Map(); // address → "connected" | "sleeping" | "disconnected", from Rust `link` events
+let lastPaired = [];
+let activeBus = null; // "usb" | "bluetooth", from Rust `active` events
+
+const LINK_TEXT = {
+  connected: "Connected",
+  sleeping: "Asleep or off: move the mouse to wake it",
+  disconnected: "Not connected",
+};
+
 function renderPaired(list) {
+  lastPaired = list;
   $("bt-paired-empty").hidden = list.length > 0;
   $("bt-paired").replaceChildren(
     ...list.map((m) => {
@@ -459,8 +471,12 @@ function renderPaired(list) {
       name.className = "bt-name";
       name.textContent = m.name || "Unnamed mouse";
       const state = document.createElement("span");
-      state.className = "bt-state" + (m.connected ? " on" : "");
-      state.textContent = m.connected ? "Connected" : "Not connected";
+      const link = linkStates.get(m.address) ?? (m.connected ? "connected" : "disconnected");
+      state.className = "bt-state" + (link === "connected" ? " on" : "");
+      state.textContent =
+        link !== "connected" && activeBus === "usb" && m.n230
+          ? "Not in use: the N230 is on the USB receiver"
+          : LINK_TEXT[link] ?? link;
       const addr = document.createElement("span");
       addr.className = "bt-addr mono";
       addr.textContent = m.address;
@@ -533,7 +549,17 @@ function onBtEvent(ev) {
       sayBt("Connected. Try a side button.");
     }
     refreshPaired();
-  } else if (ev.type === "btAdapter") showAdapter(ev.state);
+  } else if (ev.type === "link" && ev.address) {
+    linkStates.set(ev.address, ev.state);
+    renderPaired(lastPaired);
+  } else if (ev.type === "active") {
+    activeBus = ev.bus;
+    $("bt-active").textContent = `The N230 is using ${ev.bus === "bluetooth" ? "Bluetooth" : "the USB receiver"}.`;
+    renderPaired(lastPaired);
+  } else if (ev.type === "btAdapter") {
+    showAdapter(ev.state);
+    refreshPaired(); // the radio going off or on changes every link
+  }
   else if (ev.type === "btScan") setScanning(ev.active);
   else if (ev.type === "btFound") {
     btFound.set(ev.address, ev);

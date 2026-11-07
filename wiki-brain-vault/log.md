@@ -98,3 +98,12 @@ Touched: Bluetooth Connection
 
 ## [2026-11-07 17:50] session | B4 pair and forget built (Windows)
 Touched: Bluetooth Connection
+
+## [2026-11-07 18:05] session | B4 done on Windows (hands-on)
+Touched: Bluetooth Connection
+
+## [2026-11-07 18:40] session | B5 link state built (Windows)
+Touched: Bluetooth Connection
+
+## [2026-11-07 19:10] session | B5 checks, active-link UI fix
+Touched: Bluetooth Connection

@@ -28,6 +28,11 @@ struct AppState {
     bt: bt::BtHandle,
 }
 
+/// The Bluetooth addresses to watch for link state (B5): configured Bluetooth devices paired from the app.
+fn bt_addresses(c: &Config) -> Vec<String> {
+    c.devices.iter().filter(|d| d.bus == Some(device::Bus::Bluetooth)).filter_map(|d| d.address.clone()).collect()
+}
+
 /// Bluetooth adapter: "on", "off" or "missing".
 #[tauri::command]
 fn bt_adapter(state: State<AppState>) -> bt::AdapterState {
@@ -59,6 +64,7 @@ async fn bt_pair(address: String, state: State<'_, AppState>) -> Result<(Vec<Dev
     } else {
         "Paired. Move the mouse to connect."
     };
+    state.bt.watch(&bt_addresses(&c));
     Ok((c.devices.clone(), message.into()))
 }
 
@@ -72,6 +78,7 @@ async fn bt_forget(address: String, state: State<'_, AppState>) -> Result<Vec<De
     if c.forget_bluetooth(&address) {
         c.save(&state.path).map_err(|e| format!("Forgotten, but couldn't save the config: {e}"))?;
     }
+    state.bt.watch(&bt_addresses(&c));
     Ok(c.devices.clone())
 }
 
@@ -173,6 +180,19 @@ pub fn scan(stop_after: Option<u64>) {
     }
 }
 
+/// `--watch <address> [seconds]`: print link-state and adapter changes for one paired mouse (B5).
+pub fn watch(address: String, seconds: u64) {
+    let (tx, rx) = mpsc::channel();
+    let bt = bt::start(tx);
+    bt.watch(&[address]);
+    let start = Instant::now();
+    let end = start + Duration::from_secs(seconds);
+    while let Some(left) = end.checked_duration_since(Instant::now()) {
+        let Ok(ev) = rx.recv_timeout(left) else { break };
+        println!("{:8.3} {ev:?}", start.elapsed().as_secs_f64());
+    }
+}
+
 /// `--paired`: the Bluetooth mice the OS has paired (B4), one per line.
 pub fn paired() {
     let (tx, _rx) = mpsc::channel();
@@ -210,6 +230,7 @@ fn set_devices(devices: Vec<Device>, state: State<AppState>) -> Result<(), Strin
     next.devices = devices;
     state.backend.apply(next.clone())?;
     *c = next;
+    state.bt.watch(&bt_addresses(&c));
     c.save(&state.path).map_err(|e| format!("Applied, but couldn't save the config: {e}"))
 }
 
@@ -299,6 +320,7 @@ pub fn run() {
             // Backend events go to the UI on one channel, "n230", as {"type": …, …}.
             let (tx, rx) = mpsc::channel();
             let bt = bt::start(tx.clone());
+            bt.watch(&bt_addresses(&config));
             let backend = platform::start(config.clone(), tx);
             backend.set_scale(config.scale());
             let handle = app.handle().clone();

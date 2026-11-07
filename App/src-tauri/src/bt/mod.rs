@@ -17,6 +17,7 @@
 //! Pairing, forgetting and trusting only ever start from a click in the app, never by themselves.
 //! What a found device *is* (mouse? N230?) is decided here in Rust, never in JS.
 
+use crate::event::LinkState;
 use serde::Serialize;
 use std::collections::HashMap;
 
@@ -92,6 +93,42 @@ pub struct PairedMouse {
     pub name: String,
     pub n230: bool,
     pub connected: bool,
+}
+
+/// The link state of one paired mouse. The OS can't tell "asleep", "switched off" and "on another
+/// channel" apart: all are "paired, not connected". A mouse seen connected this session reads as
+/// `Sleeping` (the UI says "asleep or off: move it to wake it"); one never seen connected as `Disconnected`.
+pub fn link_state(paired: bool, connected: bool, was_connected: bool) -> LinkState {
+    if connected {
+        LinkState::Connected
+    } else if paired && was_connected {
+        LinkState::Sleeping
+    } else {
+        LinkState::Disconnected
+    }
+}
+
+/// Link state per watched address; reports only changes.
+#[derive(Default)]
+pub struct Links {
+    seen: HashMap<u64, (bool, LinkState)>, // (was connected this session, last state sent)
+}
+
+impl Links {
+    pub fn update(&mut self, address: u64, paired: bool, connected: bool) -> Option<LinkState> {
+        let (was, last) = self.seen.entry(address).or_insert((false, LinkState::Searching)); // never sent: first update is news
+        *was |= connected;
+        let next = link_state(paired, connected, *was);
+        (next != *last).then(|| {
+            *last = next;
+            next
+        })
+    }
+
+    /// Drop addresses no longer watched (forgotten / removed from the config).
+    pub fn keep(&mut self, addresses: &[u64]) {
+        self.seen.retain(|a, _| addresses.contains(a));
+    }
 }
 
 pub fn is_n230(name: &str) -> bool {
@@ -199,6 +236,26 @@ mod tests {
         for bad in ["", "FE:46:E9:24:04", "FE:46:E9:24:04:91:00", "FE:46:E9:24:04:9", "FE:46:E9:24:04:GG", "FE46E9240491"] {
             assert_eq!(parse_address(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn link_states() {
+        use LinkState::*;
+        let mut l = Links::default();
+        let a = 0xFE46_E924_0491;
+        assert_eq!(l.update(a, true, true), Some(Connected), "first report is always news");
+        assert_eq!(l.update(a, true, true), None, "no change, no event");
+        assert_eq!(l.update(a, true, false), Some(Sleeping), "paired, was connected: asleep or off");
+        assert_eq!(l.update(a, true, true), Some(Connected), "woke up");
+        assert_eq!(l.update(a, false, false), Some(Disconnected), "forgotten in Windows");
+
+        let b = 0x0000_0000_0001;
+        assert_eq!(l.update(b, true, false), Some(Disconnected), "paired but never seen connected this session");
+        assert_eq!(l.update(b, true, true), Some(Connected));
+        assert_eq!(l.update(b, true, false), Some(Sleeping));
+
+        l.keep(&[a]);
+        assert_eq!(l.update(b, true, false), Some(Disconnected), "unwatched address starts over");
     }
 
     #[test]

@@ -35,4 +35,6 @@ impl BtHandle {
     pub fn paired(&self) -> Vec<PairedMouse> {
         Vec::new()
     }
+
+    pub fn watch(&self, _addresses: &[String]) {}
 }

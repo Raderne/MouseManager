@@ -9,6 +9,9 @@ fn main() {
     if args.get(1).is_some_and(|a| a == "--scan") {
         return n230_control_lib::scan(args.get(2).and_then(|s| s.parse().ok()));
     }
+    if let (Some("--watch"), Some(address)) = (args.get(1).map(String::as_str), args.get(2)) {
+        return n230_control_lib::watch(address.clone(), args.get(3).and_then(|s| s.parse().ok()).unwrap_or(60));
+    }
     if args.get(1).is_some_and(|a| a == "--paired") {
         return n230_control_lib::paired();
     }

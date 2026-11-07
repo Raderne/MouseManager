@@ -1,15 +1,18 @@
 //! Windows: WinRT `BluetoothLEAdvertisementWatcher` for searching, `BluetoothAdapter` + `Radio` for adapter state.
 //! WinRT calls run on our own threads (implicit MTA), never on the UI thread or the input hook thread.
 
-use super::{appearance, format_address, is_n230, parse_address, AdapterState, Advert, Paired, PairedMouse, Scan, AD_APPEARANCE, SCAN_SECS};
-use crate::{device::DeviceId, event::Event};
+use super::{appearance, format_address, is_n230, parse_address, AdapterState, Advert, Links, Paired, PairedMouse, Scan, AD_APPEARANCE, SCAN_SECS};
+use crate::{
+    device::{Bus, DeviceId},
+    event::{Event, LinkState},
+};
 use std::{
     sync::{mpsc::Sender, Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
 use windows::{
-    core::{Ref, RuntimeType, GUID, HSTRING},
+    core::{IInspectable, Ref, RuntimeType, GUID, HSTRING},
     Devices::{
         Bluetooth::{
             Advertisement::{
@@ -23,7 +26,7 @@ use windows::{
             DeviceInformation, DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel,
             DevicePairingRequestedEventArgs, DevicePairingResultStatus, DeviceUnpairingResultStatus,
         },
-        Radios::RadioState,
+        Radios::{Radio, RadioState},
     },
     Foundation::TypedEventHandler,
     Storage::Streams::{DataReader, IBuffer},
@@ -44,6 +47,11 @@ pub struct BtHandle {
 struct Inner {
     watcher: Option<BluetoothLEAdvertisementWatcher>,
     scan: Scan,
+    /// Watched paired mice and their ConnectionStatusChanged tokens (B5). Holding the device keeps the subscription alive.
+    links: Vec<(BluetoothLEDevice, i64)>,
+    link_states: Links,
+    /// The adapter's radio and its StateChanged token: Bluetooth switched off/on in Windows.
+    radio: Option<(Radio, i64)>,
     /// Bumped on every start, so an old auto-stop timer can't stop a newer search.
     generation: u64,
 }
@@ -193,6 +201,84 @@ impl BtHandle {
 
     pub fn paired(&self) -> Vec<PairedMouse> {
         on_mta(|| paired_mice().unwrap_or_default()).unwrap_or_default()
+    }
+
+    /// Watches these paired mice (B5): sends `link {bluetooth, state, address}` now and on every change,
+    /// and `btAdapter` when Bluetooth is switched off or on. Replaces the previous watch list.
+    pub fn watch(&self, addresses: &[String]) {
+        let addrs: Vec<u64> = addresses.iter().filter_map(|a| parse_address(a)).collect();
+        let (events, inner) = (self.events.clone(), self.inner.clone());
+        // In the background: lookups can take seconds and must not hold up startup or a command.
+        thread::spawn(move || {
+            static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+            let _turn = ONE_AT_A_TIME.lock().unwrap_or_else(|e| e.into_inner());
+            watch_blocking(addrs, events, inner);
+        });
+    }
+}
+
+fn link_event(addr: u64, state: LinkState) -> Event {
+    Event::Link { bus: Bus::Bluetooth, state, address: Some(format_address(addr)) }
+}
+
+fn report_link(dev: &BluetoothLEDevice, addr: u64, events: &Sender<Event>, inner: &Arc<Mutex<Inner>>) {
+    let connected = dev.ConnectionStatus().is_ok_and(|s| s == BluetoothConnectionStatus::Connected);
+    let paired = dev.DeviceInformation().and_then(|i| i.Pairing()).and_then(|p| p.IsPaired()).unwrap_or(false);
+    if let Some(state) = inner.lock().unwrap().link_states.update(addr, paired, connected) {
+        let _ = events.send(link_event(addr, state));
+    }
+}
+
+fn watch_blocking(addrs: Vec<u64>, events: Sender<Event>, inner: Arc<Mutex<Inner>>) {
+    // Unsubscribe the old list first (outside the lock: handlers lock it too).
+    let old = std::mem::take(&mut inner.lock().unwrap().links);
+    for (dev, token) in old {
+        let _ = dev.RemoveConnectionStatusChanged(token);
+    }
+    inner.lock().unwrap().link_states.keep(&addrs);
+
+    let mut links = Vec::new();
+    for addr in addrs {
+        let Ok(dev) = le_device(addr) else {
+            // Not known to Windows (forgotten elsewhere): report it as disconnected once.
+            if let Some(state) = inner.lock().unwrap().link_states.update(addr, false, false) {
+                let _ = events.send(link_event(addr, state));
+            }
+            continue;
+        };
+        let (ev, st) = (events.clone(), inner.clone());
+        let token = dev.ConnectionStatusChanged(&TypedEventHandler::new(move |d: Ref<BluetoothLEDevice>, _: Ref<IInspectable>| {
+            if let Some(d) = d.as_ref() {
+                report_link(d, addr, &ev, &st);
+            }
+            Ok(())
+        }));
+        report_link(&dev, addr, &events, &inner);
+        if let Ok(token) = token {
+            links.push((dev, token));
+        }
+    }
+    inner.lock().unwrap().links = links;
+
+    if inner.lock().unwrap().radio.is_none() {
+        let radio = BluetoothAdapter::GetDefaultAsync()
+            .map_err(|e| e.message())
+            .and_then(|op| wait(op, 5, "finding the adapter"))
+            .and_then(|a| a.GetRadioAsync().map_err(|e| e.message()))
+            .and_then(|op| wait(op, 5, "finding the radio"));
+        if let Ok(radio) = radio {
+            let ev = events.clone();
+            let token = radio.StateChanged(&TypedEventHandler::new(move |r: Ref<Radio>, _: Ref<IInspectable>| {
+                if let Some(r) = r.as_ref() {
+                    let state = if r.State()? == RadioState::On { AdapterState::On } else { AdapterState::Off };
+                    let _ = ev.send(Event::BtAdapter { state });
+                }
+                Ok(())
+            }));
+            if let Ok(token) = token {
+                inner.lock().unwrap().radio = Some((radio, token));
+            }
+        }
     }
 }
 

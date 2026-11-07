@@ -17,7 +17,9 @@ pub enum Event {
     Settings { hex: String },
     /// `bus`: which link this is about; `None` when it isn't known.
     Device { bus: Option<Bus>, connected: bool, permission: bool },
-    /// Bluetooth connection state for the connect flow (phases B3–B5). `address` is `None` until known.
+    /// The N230 switched links: input now comes from the receiver (`usb`) or Bluetooth.
+    Active { bus: Bus },
+    /// Bluetooth connection state of a watched paired mouse (B5). `address` is `None` until known.
     Link { bus: Bus, state: LinkState, address: Option<String> },
     Error { message: String },
     /// Bluetooth adapter state, sent when a search starts (`on` | `off` | `missing`).
@@ -70,5 +72,6 @@ mod tests {
         );
         assert_eq!(serde_json::to_value(Event::BtAdapter { state: AdapterState::Off }).unwrap(), json!({ "type": "btAdapter", "state": "off" }));
         assert_eq!(serde_json::to_value(Event::BtScan { active: false }).unwrap(), json!({ "type": "btScan", "active": false }));
+        assert_eq!(serde_json::to_value(Event::Active { bus: Bus::Usb }).unwrap(), json!({ "type": "active", "bus": "usb" }));
     }
 }

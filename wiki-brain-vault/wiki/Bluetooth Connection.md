@@ -32,7 +32,7 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - **Bug found by the user, fixed:** the Stop button did nothing. The "search ended" event came only from the watcher's WinRT `Stopped` event, but we drop our last reference to the watcher right after `Stop()`, and then Windows **sometimes never raises `Stopped`**. The UI stayed on "Stop" while Rust had no search left to stop. (Same cause as one `--scan` run that never ended.) Fix: `stop_watcher` sends `btScan {active:false}` itself; the `Stopped` handler only reports stops we didn't ask for (radio off), and only if its search is still current; `bt_scan(false)` with nothing running still sends `active:false`, so a stale button always recovers. The lock is released around `Start()` so a synchronous `Stopped` can't deadlock. Verified: 3 hand stops (end reported in ≤10 ms) + 1 auto-stop at 30.0 s.
   - Nearby non-mouse devices seen: `49:7D:07:E6:7D:BF`, `2C:92:FD:6D:3D:86`, `26:35:07:84:E7:C7` (no names).
 
-- **2026-11-07, B4 built on Windows** (`cargo test` 31 pass; hands-on check pending):
+- **2026-11-07, B4 done on Windows** (`cargo test` 31 pass). Hands-on by the user: Forget removed the N230 from the app and from Windows; Search + Pair re-paired it from the app (this time pairing in code worked, unlike the B0 attempt after the window had closed); X1/X2 remap works afterwards. Linux half waits for Phase 9.
   - `bt::pair(address)`: `BluetoothLEDevice::FromBluetoothAddressWithBluetoothAddressTypeAsync` (Random first, then Public) → `DeviceInformation.Pairing.Custom` with **ConfirmOnly** only, `ProtectionLevel::Default`; the `PairingRequested` handler accepts ConfirmOnly and nothing else, so a PIN request fails with "pair it in Windows settings" instead of being answered for the user. Any search is stopped first. On any failure a half-made pairing is undone (`UnpairAsync`). Then the **PnP ID** (`180A`/`2A50`) is read to get the link's VID/PID.
   - `wait()` polls `IAsyncOperation.Status()` with a timeout and `Cancel()`s on expiry (pairing 30 s, lookups 10 s) instead of `.get()`, so a mouse that leaves pairing mode can't hang the app.
   - `bt::forget(address)`: `UnpairAsync`; `bt::paired()`: `GetDeviceSelectorFromPairingState(true)` + `FindAllAsyncAqsFilter`, kept if appearance `0x03C2` or the name has "N230"; reports `connected`.
@@ -41,6 +41,19 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - UI: **Pair** on every mouse in the search results; **Paired mice** list with Connected state and a two-click **Forget**. After pairing, the next `device {bluetooth, connected}` shows "Connected. Try a side button."
   - New dependency **`windows-future` 0.2**: since `windows` 0.61, `IAsyncOperation`/`AsyncStatus` live there and aren't re-exported.
   - `n230-control.exe --paired` lists paired mice (verified: `FE:46:E9:24:04:91` "Lenovo Services N230 BT1", connected).
+
+- **2026-11-07, B5 mostly done on Windows** (`cargo test` 32 pass). Hands-on by the user:
+  - Mouse off/on: `link` went connected → sleeping (37.8 s) → connected (44.9 s); remap kept working.
+  - Receiver ↔ Bluetooth: link sleeping while on the receiver (76 s → 156 s). `--log` capture: BT removal at 24.8 s, `active {usb}` at 28.9 s, BT back at 40.6 s, `active {bluetooth}` at 41.9 s.
+  - **UI fix after the first test:** the user never saw "using the USB receiver". The event *was* sent (capture above); the line was small muted text under the adapter status, easy to miss. Now: bold `.bt-active` line at the top of the Bluetooth card, and while the active bus is `usb` an N230 paired entry that isn't connected reads **"Not in use: the N230 is on the USB receiver"** instead of "Asleep or off". Confirmed by the user.
+  - **Still open for B5's "Done when":** Bluetooth radio off/on (no `btAdapter` change appeared in the recordings, so not confirmed) and a **reboot** test. Do both before B6.
+- B5 details:
+  - **The OS can't tell asleep / switched off / on another channel apart**: all are "paired, not connected". So `link_state(paired, connected, was_connected)`: connected → `connected`; paired and seen connected this session → `sleeping` (UI: "Asleep or off: move the mouse to wake it"); otherwise `disconnected`. `Links` keeps per-address state and reports only changes. No sleep-timeout timer is needed.
+  - `bt::watch(addresses)`: for each configured Bluetooth address, `BluetoothLEDevice.ConnectionStatusChanged` → `link {bluetooth, state, address}`; plus the adapter `Radio.StateChanged` → `btAdapter {on|off}`. Runs on its own thread (lookups take seconds), one watch at a time; re-run at startup and after `bt_pair`, `bt_forget`, `set_devices`.
+  - `active {bus}` from the input thread when N230 input switches between the receiver and Bluetooth (path parsed only when the device handle changes, so it's cheap at 1000 Hz).
+  - **Address rotation confirmed:** re-pairing in B4 gave the mouse a new address (`FE:46:E9:24:04:91` → `CC:CD:72:DF:59:E5`); the config got the new one from `remember_bluetooth`. Matching never uses the address, only VID/PID.
+  - CLI: `n230-control.exe --watch <address> [secs]` prints link/adapter changes.
+- **Next (when work resumes):** finish B5's radio off/on + reboot checks, then **B6** (battery over Bluetooth: `DEVPKEY_Bluetooth_Battery` first, GATT `2A19` notifications as fallback; "—" while sleeping). B2–B5 code is not committed yet (only B0–B1 are, in "phase b1").
 
 ## Idea
 

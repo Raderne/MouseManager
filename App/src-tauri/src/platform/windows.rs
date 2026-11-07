@@ -11,11 +11,9 @@
 use crate::{
     action::{self, Action, Btn, Key},
     config::{Config, Device},
-    device::DeviceId,
+    device::{Bus, DeviceId},
     event::Event,
 };
-#[cfg(test)]
-use crate::device::Bus;
 use std::{
     cell::RefCell,
     collections::{HashMap, VecDeque},
@@ -132,6 +130,9 @@ struct State {
     click_from_target: bool,
     /// The device of the last raw click.
     click_device: isize,
+    /// The configured device that last sent input, and its bus (`active` event on change).
+    active_device: isize,
+    active_bus: Option<Bus>,
     move_from_target: bool,
     jobs: VecDeque<Job>,
     scale: f64,
@@ -193,6 +194,8 @@ unsafe fn setup(events: Sender<Event>, cmds: Receiver<Cmd>, devices: Vec<Device>
                 all_devices: false,
                 click_from_target: false,
                 click_device: 0,
+                active_device: 0,
+                active_bus: None,
                 move_from_target: false,
                 jobs: VecDeque::new(),
                 scale: 1.0,
@@ -359,6 +362,15 @@ unsafe fn on_raw_input(lparam: LPARAM) {
                     (path, target)
                 })
                 .clone();
+            // Which link the N230 is using (receiver or Bluetooth): parsed only when the device changes.
+            if target && device != s.active_device {
+                s.active_device = device;
+                let bus = DeviceId::from_windows_path(&path).map(|id| id.bus);
+                if bus.is_some() && bus != s.active_bus {
+                    s.active_bus = bus;
+                    let _ = s.events.send(Event::Active { bus: bus.unwrap() });
+                }
+            }
             let mut flush = false;
             if dx != 0 || dy != 0 {
                 s.move_from_target = target;
