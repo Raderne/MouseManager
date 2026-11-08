@@ -237,12 +237,40 @@ fn report_link(dev: &BluetoothLEDevice, addr: u64, events: &Sender<Event>, inner
     if let Some(state) = state {
         let _ = events.send(link_event(addr, state));
         if state == LinkState::Connected {
-            let (dev, ev, st) = (dev.clone(), events.clone(), inner.clone());
-            thread::spawn(move || start_battery(dev, ev, st)); // GATT reads take a moment: not on the event thread
+            let (d, ev, st) = (dev.clone(), events.clone(), inner.clone());
+            thread::spawn(move || start_battery(d, ev, st)); // GATT reads take a moment: not on the event thread
+            let (d, ev) = (dev.clone(), events.clone());
+            thread::spawn(move || {
+                if let Some(info) = read_info(&d, addr) {
+                    let _ = ev.send(info);
+                }
+            });
         } else {
             stop_battery(inner, events); // asleep or off: "—", never the last number
         }
     }
+}
+
+/// Device Information (`180A`): manufacturer `2A29`, firmware `2A26` or else software revision `2A28`
+/// (B0: the N230 has `BEKEN` and software `5.3.5.8`, no firmware string). `None` if the service is unreadable.
+fn read_info(dev: &BluetoothLEDevice, addr: u64) -> Option<Event> {
+    let services = wait(
+        dev.GetGattServicesForUuidWithCacheModeAsync(GattServiceUuids::DeviceInformation().ok()?, BluetoothCacheMode::Uncached).ok()?,
+        10,
+        "reading the device information",
+    )
+    .ok()?;
+    let service = services.Services().ok()?.GetAt(0).ok()?;
+    let text = |uuid: windows::core::Result<GUID>| -> Option<String> {
+        let chars = wait(service.GetCharacteristicsForUuidAsync(uuid.ok()?).ok()?, 5, "reading the device information").ok()?;
+        let read = wait(chars.Characteristics().ok()?.GetAt(0).ok()?.ReadValueAsync().ok()?, 5, "reading the device information").ok()?;
+        (read.Status().ok()? == GattCommunicationStatus::Success).then_some(())?;
+        let s = String::from_utf8_lossy(&buffer_bytes(&read.Value().ok()?).ok()?).trim_end_matches('\0').trim().to_string();
+        (!s.is_empty()).then_some(s)
+    };
+    let manufacturer = text(GattCharacteristicUuids::ManufacturerNameString());
+    let firmware = text(GattCharacteristicUuids::FirmwareRevisionString()).or_else(|| text(GattCharacteristicUuids::SoftwareRevisionString()));
+    Some(Event::BtInfo { address: format_address(addr), manufacturer, firmware })
 }
 
 /// Sends `battery` if the value changed.

@@ -8,7 +8,10 @@ use serde::Serialize;
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum Event {
     /// `target`: the click came from a configured device. `button`: Left, Right, Middle, X1 or X2.
-    Button { device: String, target: bool, button: String, down: bool },
+    /// `bus`: receiver (`usb`) or Bluetooth, parsed from `device` in Rust; `None` for other paths.
+    Button { device: String, target: bool, button: String, down: bool, bus: Option<Bus> },
+    /// What a connected Bluetooth mouse says about itself (Device Information `180A`, read once per connection).
+    BtInfo { address: String, manufacturer: Option<String>, firmware: Option<String> },
     /// Movement summed over 50 ms.
     Move { target: bool, dx: i32, dy: i32 },
     /// `None` (null in JSON) while unknown, asleep or disconnected: the UI shows "—".
@@ -48,10 +51,14 @@ mod tests {
 
     #[test]
     fn json_shape() {
-        let b = Event::Button { device: "N230".into(), target: true, button: "X2".into(), down: true };
+        let b = Event::Button { device: "N230".into(), target: true, button: "X2".into(), down: true, bus: Some(Bus::Bluetooth) };
         assert_eq!(
             serde_json::to_value(b).unwrap(),
-            json!({ "type": "button", "device": "N230", "target": true, "button": "X2", "down": true })
+            json!({ "type": "button", "device": "N230", "target": true, "button": "X2", "down": true, "bus": "bluetooth" })
+        );
+        assert_eq!(
+            serde_json::to_value(Event::BtInfo { address: "CC:CD:72:DF:59:E5".into(), manufacturer: Some("BEKEN".into()), firmware: None }).unwrap(),
+            json!({ "type": "btInfo", "address": "CC:CD:72:DF:59:E5", "manufacturer": "BEKEN", "firmware": null })
         );
         assert_eq!(
             serde_json::to_value(Event::Battery { percent: None }).unwrap(),

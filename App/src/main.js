@@ -153,7 +153,8 @@ const stamp = (d = new Date()) =>
 
 function fmtEvent(ev) {
   switch (ev.type) {
-    case "button": return `${ev.target ? "N230 " : "other"} ${ev.button}-${ev.down ? "down" : "up"}  ${ev.device || ""}`;
+    case "button": return `${ev.target ? "N230 " : "other"} ${{ usb: "usb", bluetooth: "bt " }[ev.bus] ?? "   "} ${ev.button}-${ev.down ? "down" : "up"}  ${ev.device || ""}`;
+    case "btInfo": return `bluetooth info ${ev.address}: ${ev.manufacturer ?? "—"}, firmware ${ev.firmware ?? "—"}`;
     case "settings": return `N230  settings report ${ev.hex}`;
     case "device": return `device ${ev.bus ? ev.bus + " " : ""}${ev.connected ? "connected" : "disconnected"}${ev.permission ? "" : " (no permission)"}`;
     case "link": return `link  ${ev.bus} ${ev.state}${ev.address ? " " + ev.address : ""}`;
@@ -201,18 +202,25 @@ function renderBattery(percent) {
   const known = typeof percent === "number";
   $("battery").textContent = known ? `${percent}%` : "—";
   const ring = $("battery-ring");
-  ring.hidden = !known;
+  ring.toggleAttribute("hidden", !known); // an SVG <circle> has no .hidden property: set the attribute
   if (known) ring.setAttribute("stroke-dasharray", `${(BATTERY_C * percent) / 100} ${BATTERY_C}`);
 }
 
-invoke("get_battery").then(renderBattery).catch(() => renderBattery(null)); // in case it was read before this page loaded
+// Battery, receiver/Bluetooth presence and the active link are often reported before this page
+// listens: replay the latest values through the same handlers the events use.
+invoke("get_status")
+  .then((s) => {
+    renderBattery(s.battery);
+    onBtEvent({ type: "battery", percent: s.battery });
+    if (s.usb !== null) onBtEvent({ type: "device", bus: "usb", connected: s.usb });
+    if (s.active) onBtEvent({ type: "active", bus: s.active });
+  })
+  .catch(() => renderBattery(null));
 
 listen("n230", ({ payload: ev }) => {
   if (ev.type === "battery") renderBattery(ev.percent);
-  if (ev.type.startsWith("bt") || ["device", "link", "active"].includes(ev.type)) {
-    onBtEvent(ev);
-    if (ev.type === "btFound" && !ev.mouse && !$("all-devices").checked) return; // keep the monitor about mice
-  }
+  onBtEvent(ev); // device cards and the Add flow (ignores types it doesn't use)
+  if (ev.type === "btFound" && !ev.mouse && !$("all-devices").checked) return; // keep the monitor about mice
   addEventLine(ev);
   if (measuring && ev.type === "move" && ev.target) meter.move(ev.dx, ev.dy, performance.now());
 });
@@ -341,6 +349,7 @@ function renderDevices(list) {
   const box = $("devices");
   box.replaceChildren();
   for (const d of list) box.appendChild(deviceRow(d));
+  renderCards();
 }
 
 function setupSettings(config) {
@@ -372,59 +381,272 @@ function setupSettings(config) {
   setupBluetooth();
 }
 
-// Bluetooth search (B3). Rust decides what a device is (mouse, n230, bars); JS only shows it.
+// Devices and Bluetooth (B3–B7). Rust decides what each device is and what state it's in; JS only shows it.
 const btFound = new Map(); // address → last btFound event
+const linkStates = new Map(); // address → "connected" | "sleeping" | "disconnected" (Rust `link`)
+const btInfoByAddr = new Map(); // address → { manufacturer, firmware } (Rust `btInfo`)
+let pairedMice = []; // bt_paired: mice Windows has paired
 let btScanning = false;
+let btPairing = false;
+let btJustPaired = false; // the next Bluetooth "connected" moves the flow on
+let activeBus = null; // "usb" | "bluetooth" (Rust `active`)
+let usbPresent = null; // receiver plugged in? null = not reported yet
+let btBattery = null; // % over Bluetooth, null = unknown
+let flowStep = 0; // 0 = flow closed
 
 const ADAPTER_TEXT = {
   on: "Bluetooth is on.",
-  off: "Bluetooth is off. Turn it on in the Windows settings to search.",
+  off: "Bluetooth is off. Turn it on in the Windows settings to add or use a Bluetooth mouse.",
   missing: "No Bluetooth LE adapter found on this PC.",
 };
+
+const LINK_TEXT = {
+  connected: "Connected",
+  sleeping: "Asleep or off: move the mouse to wake it",
+  disconnected: "Not connected",
+};
+
+function make(tag, className, text) {
+  const e = document.createElement(tag);
+  if (className) e.className = className;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function sayBt(text, error = false) {
+  $("bt-status").textContent = text;
+  $("bt-status").classList.toggle("error", error);
+}
+
+function sayScan(text, error = false) {
+  $("bt-scan-status").textContent = text;
+  $("bt-scan-status").classList.toggle("error", error);
+}
 
 function showAdapter(state) {
   $("bt-adapter").textContent = ADAPTER_TEXT[state] ?? "—";
   $("bt-settings").hidden = state !== "off";
-  $("bt-search").disabled = state !== "on" && !btScanning;
+  $("bt-add").disabled = state !== "on" && flowStep === 0;
+}
+
+// A button that needs a second click within 4 s (forgetting or removing a mouse can't be undone in one click).
+function confirmButton(label, armedLabel, onConfirm) {
+  const b = make("button", "btn ghost", label);
+  b.type = "button";
+  let armed = null;
+  b.addEventListener("click", () => {
+    if (!armed) {
+      b.textContent = armedLabel;
+      armed = setTimeout(() => {
+        armed = null;
+        b.textContent = label;
+      }, 4000);
+      return;
+    }
+    clearTimeout(armed);
+    armed = null;
+    b.disabled = true;
+    onConfirm(b);
+  });
+  return b;
+}
+
+// --- Device cards ---------------------------------------------------------------------------
+
+/** One card per configured receiver / Bluetooth mouse paired from the app, plus mice Windows paired on its own. */
+function cardModels() {
+  const models = [];
+  const known = new Set();
+  for (const d of devices) {
+    if (d.bus === "usb") {
+      models.push({ kind: "usb", device: d });
+    } else if (d.bus === "bluetooth" && d.address) {
+      known.add(d.address.toUpperCase());
+      models.push({ kind: "bt", device: d, address: d.address, paired: pairedMice.find((m) => m.address === d.address) });
+    }
+  }
+  for (const m of pairedMice) {
+    if (!known.has(m.address.toUpperCase())) models.push({ kind: "bt-windows", address: m.address, paired: m });
+  }
+  return models;
+}
+
+function cardState(m) {
+  if (m.kind === "usb") {
+    if (activeBus === "usb") return { text: "In use", on: true };
+    if (usbPresent === false) return { text: "Unplugged" };
+    return { text: usbPresent ? "Plugged in" : "Receiver" };
+  }
+  const link = linkStates.get(m.address) ?? (m.paired?.connected ? "connected" : m.paired ? "disconnected" : "disconnected");
+  if (link !== "connected" && activeBus === "usb" && (m.paired?.n230 || m.device?.name?.includes("N230"))) {
+    return { text: "Not in use: the N230 is on the USB receiver", link };
+  }
+  return { text: LINK_TEXT[link] ?? link, on: link === "connected", link };
+}
+
+function renderCards() {
+  const list = cardModels();
+  const box = $("device-cards");
+  if (!list.length) {
+    box.replaceChildren(make("li", "muted", "No devices yet. Add the N230 over Bluetooth, or plug in its receiver."));
+    return;
+  }
+  box.replaceChildren(
+    ...list.map((m) => {
+      const li = make("li", "device-card");
+      const name =
+        m.device?.name || m.paired?.name || (m.kind === "usb" ? `USB device ${m.device.vid}:${m.device.pid}` : "Bluetooth mouse");
+      const state = cardState(m);
+
+      const head = make("div", "card-head");
+      const icon = make("span", "conn-icon", m.kind === "usb" ? "USB" : "BT");
+      icon.setAttribute("aria-hidden", "true");
+      const title = make("span", "card-name", name);
+      head.append(icon, title);
+      if (m.kind === "bt-windows") head.append(make("span", "card-note", "Paired in Windows"));
+
+      const facts = make("dl", "card-facts");
+      const fact = (label, value) => facts.append(make("dt", "", label), make("dd", "", value));
+      const stateDd = make("span", "bt-state" + (state.on ? " on" : ""), state.text);
+      facts.append(make("dt", "", "Status"));
+      const dd = make("dd");
+      dd.append(stateDd);
+      facts.append(dd);
+      if (m.kind === "usb") {
+        fact("Battery", "— (not reported over the receiver)");
+      } else {
+        fact("Battery", state.link === "connected" && btBattery !== null && m.kind === "bt" ? `${btBattery}%` : "—");
+        const info = btInfoByAddr.get(m.address);
+        fact("Firmware", info?.firmware ?? "—");
+        if (info?.manufacturer) fact("Made by", info.manufacturer);
+        fact("Address", m.address);
+      }
+
+      const actions = make("div", "device-actions");
+      if (m.kind !== "usb") {
+        const forget = confirmButton("Forget", "Click again to forget", (b) => {
+          b.textContent = "Forgetting…";
+          invoke("bt_forget", { address: m.address })
+            .then((list) => {
+              renderDevices(list);
+              sayBt(`Forgot ${name}. It's no longer paired with this PC.`);
+              refreshPaired();
+            })
+            .catch((e) => {
+              sayBt(String(e), true);
+              refreshPaired();
+            });
+        });
+        forget.setAttribute("aria-label", `Forget ${name} in Windows`);
+        actions.append(forget);
+      }
+      if (m.device) {
+        const remove = confirmButton("Remove from app", "Click again to remove", () => {
+          const next = devices.filter((d) => d !== m.device);
+          commitDevices(next);
+          sayBt(`${name} is no longer remapped.${m.kind === "usb" ? "" : " It stays paired in Windows."}`);
+        });
+        remove.setAttribute("aria-label", `Stop remapping ${name}`);
+        actions.append(remove);
+      }
+
+      li.append(head, facts, actions);
+      return li;
+    })
+  );
+}
+
+function refreshPaired() {
+  invoke("bt_paired")
+    .then((list) => {
+      pairedMice = list;
+      renderCards();
+    })
+    .catch((e) => console.error("bt_paired:", e));
+}
+
+// --- Header link marker --------------------------------------------------------------------
+
+function renderLinkChip() {
+  const chip = $("link-chip");
+  chip.hidden = !activeBus;
+  chip.textContent = activeBus === "bluetooth" ? "BT" : "USB";
+  chip.setAttribute("aria-label", activeBus === "bluetooth" ? "Connected over Bluetooth" : "Connected through the USB receiver");
+  chip.title = chip.getAttribute("aria-label");
+}
+
+// --- Add Bluetooth mouse flow --------------------------------------------------------------
+
+function gotoStep(n) {
+  flowStep = n;
+  $("bt-flow").hidden = n === 0;
+  $("bt-add").hidden = n !== 0;
+  for (const s of document.querySelectorAll("#bt-flow .flow-step")) s.hidden = Number(s.dataset.step) !== n;
+  for (const li of document.querySelectorAll("#bt-flow .flow-steps li")) {
+    const k = Number(li.dataset.for);
+    li.classList.toggle("done", k < n);
+    if (k === n) li.setAttribute("aria-current", "step");
+    else li.removeAttribute("aria-current");
+  }
+  const first = document.querySelector(`#bt-flow .flow-step[data-step="${n}"] button`);
+  if (first) first.focus();
+}
+
+function openFlow() {
+  btFound.clear();
+  renderBtFound();
+  sayBt("");
+  $("try-x1").classList.remove("on");
+  $("try-x2").classList.remove("on");
+  gotoStep(1);
+}
+
+function closeFlow() {
+  if (btScanning) invoke("bt_scan", { on: false }).catch(() => {});
+  gotoStep(0);
+  $("bt-add").focus();
+}
+
+function startScan() {
+  btFound.clear();
+  renderBtFound();
+  invoke("bt_scan", { on: true }).catch((e) => {
+    sayScan(String(e), true);
+    invoke("bt_adapter").then(showAdapter);
+  });
+}
+
+function setScanning(on) {
+  btScanning = on;
+  $("bt-rescan").textContent = on ? "Stop" : "Search again";
+  if (on) {
+    sayScan("Searching… the N230 shows up within about 10 seconds.");
+  } else {
+    const mice = [...btFound.values()].filter((d) => d.mouse);
+    sayScan(
+      mice.length ? `Search finished: ${mice.length} ${mice.length === 1 ? "mouse" : "mice"} found. Pick yours and click Pair.` : "No mouse found. Is the N230 blinking (pairing mode)?",
+      mice.length === 0
+    );
+  }
 }
 
 function renderBtFound() {
   const all = $("bt-all").checked;
-  const list = [...btFound.values()]
-    .filter((d) => d.mouse || all)
-    .sort((a, b) => b.n230 - a.n230 || b.rssi - a.rssi);
+  const list = [...btFound.values()].filter((d) => d.mouse || all).sort((a, b) => b.n230 - a.n230 || b.rssi - a.rssi);
   $("bt-found").replaceChildren(
     ...list.map((d) => {
-      const li = document.createElement("li");
-      li.className = "bt-item" + (d.n230 ? " n230" : "");
-      const name = document.createElement("span");
-      name.className = "bt-name";
-      name.textContent = d.name || "Unnamed device";
-      li.append(name);
-      if (d.n230) {
-        const badge = document.createElement("span");
-        badge.className = "bt-badge";
-        badge.textContent = "N230";
-        li.append(badge);
-      }
-      const addr = document.createElement("span");
-      addr.className = "bt-addr mono";
-      addr.textContent = d.address;
-      const bars = document.createElement("span");
-      bars.className = "bt-bars";
+      const li = make("li", "bt-item" + (d.n230 ? " n230" : ""));
+      li.append(make("span", "bt-name", d.name || "Unnamed device"));
+      if (d.n230) li.append(make("span", "bt-badge", "N230"));
+      li.append(make("span", "bt-addr mono", d.address));
+      const bars = make("span", "bt-bars");
       bars.setAttribute("role", "img");
       bars.setAttribute("aria-label", `Signal ${d.bars} of 4`);
-      for (let i = 1; i <= 4; i++) {
-        const b = document.createElement("span");
-        if (i <= d.bars) b.className = "on";
-        bars.append(b);
-      }
-      li.append(addr, bars);
+      for (let i = 1; i <= 4; i++) bars.append(make("span", i <= d.bars ? "on" : ""));
+      li.append(bars);
       if (d.mouse) {
-        const pair = document.createElement("button");
-        pair.className = "btn";
+        const pair = make("button", "btn", "Pair");
         pair.type = "button";
-        pair.textContent = "Pair";
         pair.disabled = btPairing;
         pair.setAttribute("aria-label", `Pair ${d.name || d.address}`);
         pair.addEventListener("click", () => pairMouse(d));
@@ -433,166 +655,105 @@ function renderBtFound() {
       return li;
     })
   );
-  return list;
-}
-
-let btPairing = false;
-let btJustPaired = false; // the next Bluetooth "connected" event finishes the flow
-
-function sayBt(text, error = false) {
-  $("bt-status").textContent = text;
-  $("bt-status").classList.toggle("error", error);
 }
 
 function pairMouse(d) {
   btPairing = true;
-  renderBtFound();
-  sayBt(`Pairing with ${d.name || d.address}… keep the mouse close and in pairing mode.`);
+  gotoStep(3);
+  $("bt-pair-text").textContent = `Pairing with ${d.name || d.address}…`;
   invoke("bt_pair", { address: d.address })
     .then(([list, message]) => {
       renderDevices(list);
       btFound.delete(d.address); // paired mice stop advertising
       btJustPaired = true;
-      sayBt(message);
       refreshPaired();
+      if (flowStep) {
+        $("bt-done-text").textContent = message;
+        gotoStep(4);
+      } else {
+        sayBt(message); // the flow was hidden while pairing
+      }
     })
-    .catch((e) => sayBt(String(e), true))
+    .catch((e) => {
+      if (flowStep) {
+        gotoStep(2);
+        sayScan(String(e), true);
+      } else {
+        sayBt(String(e), true);
+      }
+    })
     .finally(() => {
       btPairing = false;
       renderBtFound();
     });
 }
 
-const linkStates = new Map(); // address → "connected" | "sleeping" | "disconnected", from Rust `link` events
-let lastPaired = [];
-let activeBus = null; // "usb" | "bluetooth", from Rust `active` events
-
-const LINK_TEXT = {
-  connected: "Connected",
-  sleeping: "Asleep or off: move the mouse to wake it",
-  disconnected: "Not connected",
-};
-
-function renderPaired(list) {
-  lastPaired = list;
-  $("bt-paired-empty").hidden = list.length > 0;
-  $("bt-paired").replaceChildren(
-    ...list.map((m) => {
-      const li = document.createElement("li");
-      li.className = "bt-item" + (m.n230 ? " n230" : "");
-      const name = document.createElement("span");
-      name.className = "bt-name";
-      name.textContent = m.name || "Unnamed mouse";
-      const state = document.createElement("span");
-      const link = linkStates.get(m.address) ?? (m.connected ? "connected" : "disconnected");
-      state.className = "bt-state" + (link === "connected" ? " on" : "");
-      state.textContent =
-        link !== "connected" && activeBus === "usb" && m.n230
-          ? "Not in use: the N230 is on the USB receiver"
-          : LINK_TEXT[link] ?? link;
-      const addr = document.createElement("span");
-      addr.className = "bt-addr mono";
-      addr.textContent = m.address;
-      const forget = document.createElement("button");
-      forget.className = "btn ghost";
-      forget.type = "button";
-      forget.textContent = "Forget";
-      forget.setAttribute("aria-label", `Forget ${m.name || m.address}`);
-      let armed = null; // two clicks: forgetting means pairing again later
-      forget.addEventListener("click", () => {
-        if (!armed) {
-          forget.textContent = "Click again to forget";
-          armed = setTimeout(() => {
-            armed = null;
-            forget.textContent = "Forget";
-          }, 4000);
-          return;
-        }
-        clearTimeout(armed);
-        forget.disabled = true;
-        forget.textContent = "Forgetting…";
-        invoke("bt_forget", { address: m.address })
-          .then((devices) => {
-            renderDevices(devices);
-            sayBt(`Forgot ${m.name || m.address}. It's no longer paired with this PC.`);
-            refreshPaired();
-          })
-          .catch((e) => {
-            sayBt(String(e), true);
-            refreshPaired();
-          });
-      });
-      li.append(name);
-      if (m.n230) {
-        const badge = document.createElement("span");
-        badge.className = "bt-badge";
-        badge.textContent = "N230";
-        li.append(badge);
-      }
-      li.append(state, addr, forget);
-      return li;
-    })
-  );
-}
-
-function refreshPaired() {
-  invoke("bt_paired").then(renderPaired).catch((e) => console.error("bt_paired:", e));
-}
-
-function setScanning(on) {
-  btScanning = on;
-  $("bt-search").textContent = on ? "Stop" : "Search for mouse";
-  $("bt-search").disabled = false;
-  if (on) {
-    $("bt-status").classList.remove("error");
-    $("bt-status").textContent = "Searching…";
-  } else {
-    const mice = [...btFound.values()].filter((d) => d.mouse);
-    $("bt-status").classList.toggle("error", mice.length === 0);
-    $("bt-status").textContent = mice.length
-      ? `Search finished: ${mice.length} ${mice.length === 1 ? "mouse" : "mice"} found.`
-      : "No mouse found. Is the N230 in pairing mode?";
-  }
-}
+// --- Events --------------------------------------------------------------------------------
 
 function onBtEvent(ev) {
-  if (ev.type === "device" && ev.bus === "bluetooth") {
-    if (ev.connected && btJustPaired) {
-      btJustPaired = false;
-      sayBt("Connected. Try a side button.");
-    }
-    refreshPaired();
-  } else if (ev.type === "link" && ev.address) {
-    linkStates.set(ev.address, ev.state);
-    renderPaired(lastPaired);
-  } else if (ev.type === "active") {
-    activeBus = ev.bus;
-    $("bt-active").textContent = `The N230 is using ${ev.bus === "bluetooth" ? "Bluetooth" : "the USB receiver"}.`;
-    renderPaired(lastPaired);
-  } else if (ev.type === "btAdapter") {
-    showAdapter(ev.state);
-    refreshPaired(); // the radio going off or on changes every link
-  }
-  else if (ev.type === "btScan") setScanning(ev.active);
-  else if (ev.type === "btFound") {
-    btFound.set(ev.address, ev);
-    renderBtFound();
+  switch (ev.type) {
+    case "btAdapter":
+      showAdapter(ev.state);
+      refreshPaired(); // the radio going off or on changes every link
+      break;
+    case "btScan":
+      setScanning(ev.active);
+      break;
+    case "btFound":
+      btFound.set(ev.address, ev);
+      renderBtFound();
+      break;
+    case "btInfo":
+      btInfoByAddr.set(ev.address, { manufacturer: ev.manufacturer, firmware: ev.firmware });
+      renderCards();
+      break;
+    case "link":
+      if (ev.address) linkStates.set(ev.address, ev.state);
+      renderCards();
+      break;
+    case "battery":
+      btBattery = ev.percent ?? null;
+      renderCards();
+      break;
+    case "active":
+      activeBus = ev.bus;
+      $("bt-active").textContent = `The N230 is using ${ev.bus === "bluetooth" ? "Bluetooth" : "the USB receiver"}.`;
+      renderLinkChip();
+      renderCards();
+      break;
+    case "device":
+      if (ev.bus === "usb") usbPresent = ev.connected;
+      if (ev.bus === "bluetooth") {
+        if (ev.connected && btJustPaired) {
+          btJustPaired = false;
+          if (flowStep === 4) $("bt-done-text").textContent = "Connected. Press a side button to check the remap.";
+          else sayBt("Connected over Bluetooth.");
+        }
+        refreshPaired();
+      }
+      renderCards();
+      break;
+    case "button":
+      if (flowStep === 4 && ev.target && ev.bus === "bluetooth" && (ev.button === "X1" || ev.button === "X2")) {
+        $(ev.button === "X1" ? "try-x1" : "try-x2").classList.toggle("on", ev.down);
+        if (ev.down) $("bt-done-text").textContent = `${ev.button} works over Bluetooth. Click Finish when you're done.`;
+      }
+      break;
   }
 }
 
 function setupBluetooth() {
   invoke("bt_adapter").then(showAdapter).catch((e) => console.error("bt_adapter:", e));
   refreshPaired();
+  $("bt-add").addEventListener("click", openFlow);
   $("bt-search").addEventListener("click", () => {
-    if (!btScanning) {
-      btFound.clear();
-      renderBtFound();
-    }
-    invoke("bt_scan", { on: !btScanning }).catch((e) => {
-      $("bt-status").classList.add("error");
-      $("bt-status").textContent = String(e);
-      invoke("bt_adapter").then(showAdapter);
-    });
+    gotoStep(2);
+    startScan();
+  });
+  $("bt-rescan").addEventListener("click", () => (btScanning ? invoke("bt_scan", { on: false }).catch(() => {}) : startScan()));
+  for (const b of document.querySelectorAll("#bt-flow [data-cancel]")) b.addEventListener("click", closeFlow);
+  $("bt-flow").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") closeFlow();
   });
   $("bt-settings").addEventListener("click", () => invoke("bt_open_settings").catch((e) => console.error(e)));
   $("bt-all").addEventListener("change", renderBtFound);

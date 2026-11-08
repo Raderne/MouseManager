@@ -116,3 +116,6 @@ Touched: Bluetooth Connection
 
 ## [2026-11-08 11:20] session | B6 Bluetooth battery built (Windows)
 Touched: Bluetooth Connection, Battery Reading, index
+
+## [2026-11-08 12:40] session | B7 devices UI and add flow built
+Touched: Bluetooth Connection

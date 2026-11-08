@@ -40,6 +40,7 @@
           <div class="value mono" id="battery">—</div>
           <div class="muted">Battery</div>
         </div>
+        <span class="link-chip mono" id="link-chip" role="img" hidden></span>
       </div>
     </header>
 
@@ -203,34 +204,82 @@
         </div>
 
         <div class="settings-group">
-          <h2>Devices</h2>
-          <p class="muted">Only these VID:PID devices are remapped. Add the Bluetooth and wired IDs here.</p>
-          <div id="devices"></div>
-          <div class="device-actions">
-            <button class="btn ghost" type="button" id="device-add">Add device</button>
+          <div class="group-head">
+            <h2>Devices</h2>
+            <button class="btn" type="button" id="bt-add">Add Bluetooth mouse</button>
           </div>
-          <p class="status" id="devices-status" role="status"></p>
-        </div>
-
-        <div class="settings-group">
-          <h2>Bluetooth</h2>
           <p class="bt-active" id="bt-active" role="status"></p>
-          <p class="muted" id="bt-adapter">Checking the Bluetooth adapter…</p>
-          <div class="device-actions">
-            <button class="btn" type="button" id="bt-search">Search for mouse</button>
+          <div class="bt-adapter-row">
+            <p class="muted" id="bt-adapter">Checking the Bluetooth adapter…</p>
             <button class="btn ghost" type="button" id="bt-settings" hidden>Open Bluetooth settings</button>
-            <label class="setting compact">
-              <input type="checkbox" id="bt-all" />
-              <span class="switch" aria-hidden="true"></span>
-              <span class="name">Show all devices</span>
-            </label>
           </div>
-          <p class="muted">Put the N230 in Bluetooth pairing mode first. A search runs for 30 seconds.</p>
-          <ul class="bt-list" id="bt-found" aria-label="Bluetooth devices found"></ul>
+          <ul class="device-cards" id="device-cards" aria-label="Your devices"></ul>
           <p class="status" id="bt-status" role="status"></p>
-          <h3 class="bt-sub">Paired mice</h3>
-          <ul class="bt-list" id="bt-paired" aria-label="Paired Bluetooth mice"></ul>
-          <p class="muted" id="bt-paired-empty">No Bluetooth mouse is paired with this PC.</p>
+
+          <!-- Add Bluetooth mouse (B7): 4 steps, Cancel on each. -->
+          <section class="bt-flow" id="bt-flow" aria-labelledby="bt-flow-title" hidden>
+            <div class="flow-head">
+              <h3 id="bt-flow-title">Add Bluetooth mouse</h3>
+              <ol class="flow-steps" aria-label="Steps">
+                <li data-for="1">Pairing mode</li>
+                <li data-for="2">Search</li>
+                <li data-for="3">Pair</li>
+                <li data-for="4">Try it</li>
+              </ol>
+            </div>
+
+            <div class="flow-step" data-step="1">
+              <p>Slide the switch on the bottom of the N230 to <strong>BT</strong>, then put it in pairing mode: its light blinks.</p>
+              <p class="muted">The mouse has two Bluetooth channels (BT1, BT2). Pairing one leaves the other untouched.</p>
+              <div class="device-actions">
+                <button class="btn" type="button" id="bt-search">It's blinking: search</button>
+                <button class="btn ghost" type="button" data-cancel>Cancel</button>
+              </div>
+            </div>
+
+            <div class="flow-step" data-step="2" hidden>
+              <div class="device-actions">
+                <button class="btn ghost" type="button" id="bt-rescan">Search again</button>
+                <label class="setting compact">
+                  <input type="checkbox" id="bt-all" />
+                  <span class="switch" aria-hidden="true"></span>
+                  <span class="name">Show all devices</span>
+                </label>
+                <button class="btn ghost" type="button" data-cancel>Cancel</button>
+              </div>
+              <p class="status" id="bt-scan-status" role="status"></p>
+              <ul class="bt-list" id="bt-found" aria-label="Bluetooth devices found"></ul>
+            </div>
+
+            <div class="flow-step" data-step="3" hidden>
+              <p id="bt-pair-text" role="status">Pairing…</p>
+              <p class="muted">Keep the mouse close and in pairing mode. This takes up to 30 seconds.</p>
+              <div class="device-actions">
+                <button class="btn ghost" type="button" data-cancel>Hide</button>
+              </div>
+            </div>
+
+            <div class="flow-step" data-step="4" hidden>
+              <p id="bt-done-text" role="status">Paired. Move the mouse to connect, then press a side button.</p>
+              <div class="x-try" aria-label="Side buttons over Bluetooth">
+                <span class="x-key" id="try-x1">X1 · Back</span>
+                <span class="x-key" id="try-x2">X2 · Forward</span>
+              </div>
+              <div class="device-actions">
+                <button class="btn" type="button" data-cancel>Finish</button>
+              </div>
+            </div>
+          </section>
+
+          <details class="advanced">
+            <summary>Advanced: VID:PID list</summary>
+            <p class="muted">Only these devices are remapped. Pairing from the app fills this in; edit it only for another mouse.</p>
+            <div id="devices"></div>
+            <div class="device-actions">
+              <button class="btn ghost" type="button" id="device-add">Add device</button>
+            </div>
+            <p class="status" id="devices-status" role="status"></p>
+          </details>
         </div>
       </section>
     </main>

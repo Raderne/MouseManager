@@ -118,15 +118,28 @@ impl Config {
     /// After pairing in the app: record the Bluetooth address and name on the entry for this VID/PID
     /// (adding one if there's none). `id` is `None` when the PnP ID couldn't be read: nothing to match, no change.
     /// Returns whether anything changed.
-    pub fn remember_bluetooth(&mut self, id: Option<DeviceId>, address: &str, name: &str) -> bool {
+    ///
+    /// The N230 has two Bluetooth channels with the same VID/PID, so an entry is reused only if it is this
+    /// address, has no address, or holds an address Windows no longer has paired (`still_paired`; a re-pair
+    /// of the same channel gets a new address). Otherwise the other channel's entry is kept and one is added.
+    pub fn remember_bluetooth(&mut self, id: Option<DeviceId>, address: &str, name: &str, still_paired: &[String]) -> bool {
         let Some(id) = id else { return false };
         let bt = DeviceId { bus: Bus::Bluetooth, ..id };
         let name = Some(name.to_string()).filter(|n| !n.is_empty());
         let before = self.devices.clone();
-        match self.devices.iter_mut().find(|d| d.matches(&bt)) {
+        let same = |a: &str| a.eq_ignore_ascii_case(address);
+        let stale = |a: &str| !still_paired.iter().any(|p| p.eq_ignore_ascii_case(a));
+        let slot = self
+            .devices
+            .iter()
+            .position(|d| d.matches(&bt) && d.address.as_deref().is_some_and(same))
+            .or_else(|| self.devices.iter().position(|d| d.matches(&bt) && d.address.as_deref().is_none_or(stale)));
+        match slot.map(|i| &mut self.devices[i]) {
             Some(d) => {
                 d.bus = Some(Bus::Bluetooth);
-                d.address = Some(address.to_string());
+                if !d.address.as_deref().is_some_and(same) {
+                    d.address = Some(address.to_string()); // same address in another case: keep the stored one
+                }
                 d.name = name.or(d.name.take());
             }
             None => self.devices.push(Device {
@@ -271,23 +284,36 @@ mod tests {
     fn remember_and_forget_bluetooth() {
         let n230 = Some(DeviceId { bus: Bus::Bluetooth, vid: 0x25A7, pid: 0xFAA2 });
         let mut c = Config::default();
-        assert!(c.remember_bluetooth(n230, "FE:46:E9:24:04:91", "Lenovo Services N230 BT1"));
+        assert!(c.remember_bluetooth(n230, "FE:46:E9:24:04:91", "Lenovo Services N230 BT1", &[]));
         assert_eq!(c.devices.len(), 2, "the default Bluetooth entry is updated, not duplicated");
         let bt = &c.devices[1];
         assert_eq!((bt.address.as_deref(), bt.name.as_deref()), (Some("FE:46:E9:24:04:91"), Some("Lenovo Services N230 BT1")));
-        assert!(!c.remember_bluetooth(n230, "FE:46:E9:24:04:91", "Lenovo Services N230 BT1"), "same again: no change");
-        assert!(!c.remember_bluetooth(None, "FE:46:E9:24:04:91", "x"), "no PnP ID: nothing to match");
+        assert!(!c.remember_bluetooth(n230, "FE:46:E9:24:04:91", "Lenovo Services N230 BT1", &[]), "same again: no change");
+        assert!(!c.remember_bluetooth(None, "FE:46:E9:24:04:91", "x", &[]), "no PnP ID: nothing to match");
 
         // An entry without a bus (old config) is claimed for Bluetooth; an empty name keeps the old one.
         let mut old = Config { devices: vec![Device { name: Some("mine".into()), ..Device::new("25a7", "faa2", None) }], ..Config::default() };
-        assert!(old.remember_bluetooth(n230, "AA:BB:CC:DD:EE:FF", ""));
+        assert!(old.remember_bluetooth(n230, "AA:BB:CC:DD:EE:FF", "", &[]));
         assert_eq!((old.devices[0].bus, old.devices[0].name.as_deref()), (Some(Bus::Bluetooth), Some("mine")));
 
         // A mouse not in the list gets a new entry; a USB-only entry for the same IDs isn't reused.
         let mut usb = Config { devices: vec![Device::new("25A7", "FAA2", Some(Bus::Usb))], ..Config::default() };
-        assert!(usb.remember_bluetooth(n230, "AA:BB:CC:DD:EE:FF", "N230"));
+        assert!(usb.remember_bluetooth(n230, "AA:BB:CC:DD:EE:FF", "N230", &[]));
         assert_eq!(usb.devices.len(), 2);
         assert_eq!((usb.devices[1].vid.as_str(), usb.devices[1].pid.as_str()), ("25A7", "FAA2"));
+
+        // Two Bluetooth channels (BT1 and BT2) on one PC: same VID/PID, both paired → two entries.
+        let mut two = Config::default();
+        let bt1 = "FE:46:E9:24:04:91".to_string();
+        assert!(two.remember_bluetooth(n230, &bt1, "Lenovo Services N230 BT1", &[]));
+        assert!(two.remember_bluetooth(n230, "DB:13:6A:63:29:D1", "Lenovo Services N230 BT2", &[bt1.clone()]));
+        assert_eq!(two.devices.len(), 3, "BT1 still paired: BT2 gets its own entry");
+        assert_eq!(two.devices[1].address.as_deref(), Some(bt1.as_str()), "BT1's entry untouched");
+        assert!(!two.remember_bluetooth(n230, "db:13:6a:63:29:d1", "Lenovo Services N230 BT2", &[bt1.clone()]), "BT2 again: its own entry, no change");
+        // Re-pairing BT1 gives it a new address; the old one is no longer paired, so its entry is reused.
+        assert!(two.remember_bluetooth(n230, "CC:CD:72:DF:59:E5", "Lenovo Services N230 BT1", &["DB:13:6A:63:29:D1".to_string()]));
+        assert_eq!(two.devices.len(), 3, "a stale address is replaced, not piled up");
+        assert_eq!(two.devices[1].address.as_deref(), Some("CC:CD:72:DF:59:E5"));
 
         assert!(c.forget_bluetooth("fe:46:e9:24:04:91"), "address match ignores case");
         assert_eq!(c.devices[1].address, None);

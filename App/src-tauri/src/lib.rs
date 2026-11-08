@@ -26,14 +26,38 @@ struct AppState {
     path: PathBuf,
     backend: platform::Handle,
     bt: bt::BtHandle,
-    /// The last `battery` value sent, for a page that loads after it (`None` = "—").
-    battery: Arc<Mutex<Option<u8>>>,
+    /// The latest battery / device / active-link values, for a page that loads after they were sent.
+    status: Arc<Mutex<Status>>,
 }
 
-/// The battery % as last reported (B6), or `None` while unknown.
+/// What a page that opens late has missed: these events fire at startup, often before the page listens.
+#[derive(serde::Serialize, Clone, Default)]
+struct Status {
+    /// Battery % over Bluetooth; `None` = unknown ("—").
+    battery: Option<u8>,
+    /// Receiver plugged in / Bluetooth mouse connected, from the input backend; `None` = not reported yet.
+    usb: Option<bool>,
+    bluetooth: Option<bool>,
+    /// The link the N230 last sent input on.
+    active: Option<device::Bus>,
+}
+
+impl Status {
+    fn note(&mut self, ev: &Event) {
+        match ev {
+            Event::Battery { percent } => self.battery = *percent,
+            Event::Device { bus: Some(device::Bus::Usb), connected, .. } => self.usb = Some(*connected),
+            Event::Device { bus: Some(device::Bus::Bluetooth), connected, .. } => self.bluetooth = Some(*connected),
+            Event::Active { bus } => self.active = Some(*bus),
+            _ => {}
+        }
+    }
+}
+
+/// The latest battery, device and active-link status (see `Status`).
 #[tauri::command]
-fn get_battery(state: State<AppState>) -> Option<u8> {
-    *state.battery.lock().unwrap()
+fn get_status(state: State<AppState>) -> Status {
+    state.status.lock().unwrap().clone()
 }
 
 /// The Bluetooth addresses to watch for link state (B5): configured Bluetooth devices paired from the app.
@@ -59,10 +83,16 @@ fn bt_scan(on: bool, state: State<AppState>) -> Result<(), String> {
 #[tauri::command]
 async fn bt_pair(address: String, state: State<'_, AppState>) -> Result<(Vec<Device>, String), String> {
     let bt = state.bt.clone();
-    let paired = tauri::async_runtime::spawn_blocking(move || bt.pair(&address)).await.map_err(|e| e.to_string())??;
+    let (paired, still_paired) = tauri::async_runtime::spawn_blocking(move || {
+        let p = bt.pair(&address)?;
+        let others: Vec<String> = bt.paired().into_iter().map(|m| m.address).collect(); // the other channel may be paired too
+        Ok::<_, String>((p, others))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     let mut c = state.config.lock().unwrap();
     let mut next = c.clone();
-    let message = if next.remember_bluetooth(paired.id, &paired.address, &paired.name) {
+    let message = if next.remember_bluetooth(paired.id, &paired.address, &paired.name, &still_paired) {
         state.backend.apply(next.clone())?;
         *c = next;
         c.save(&state.path).map_err(|e| format!("Paired, but couldn't save the config: {e}"))?;
@@ -150,7 +180,7 @@ pub fn log(seconds: u64) {
         let Ok(ev) = rx.recv_timeout(left) else { break };
         let t = start.elapsed().as_secs_f64();
         match ev {
-            Event::Button { device, target, button, down } => {
+            Event::Button { device, target, button, down, .. } => {
                 let tag = if target { "N230 " } else { "other" };
                 println!("{t:8.3} [{tag}] {button}-{}  {device}", if down { "down" } else { "up" });
             }
@@ -327,7 +357,7 @@ pub fn run() {
             bt_pair,
             bt_forget,
             bt_paired,
-            get_battery
+            get_status
         ])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");
@@ -348,21 +378,21 @@ pub fn run() {
             let backend = platform::start(config.clone(), tx);
             backend.set_scale(config.scale());
             let handle = app.handle().clone();
-            let battery = Arc::new(Mutex::new(None));
-            let last_battery = battery.clone();
+            let status = Arc::new(Mutex::new(Status::default()));
+            let last = status.clone();
             thread::spawn(move || {
                 let mut low = bt::LowBattery::default();
                 for ev in rx {
-                    if let Event::Battery { percent } = ev {
-                        *last_battery.lock().unwrap() = percent;
-                        if percent.is_some_and(|p| low.check(p)) {
-                            low_battery_notice(&handle, percent.unwrap());
+                    last.lock().unwrap().note(&ev);
+                    if let Event::Battery { percent: Some(p) } = ev {
+                        if low.check(p) {
+                            low_battery_notice(&handle, p);
                         }
                     }
                     let _ = handle.emit("n230", ev);
                 }
             });
-            app.manage(AppState { config: Mutex::new(config), path, backend, bt, battery });
+            app.manage(AppState { config: Mutex::new(config), path, backend, bt, status });
 
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;
@@ -399,4 +429,25 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use device::Bus;
+
+    #[test]
+    fn status_keeps_the_latest_values() {
+        let mut s = Status::default();
+        s.note(&Event::Battery { percent: Some(83) });
+        s.note(&Event::Device { bus: Some(Bus::Usb), connected: true, permission: true });
+        s.note(&Event::Device { bus: Some(Bus::Bluetooth), connected: true, permission: true });
+        s.note(&Event::Active { bus: Bus::Bluetooth });
+        s.note(&Event::Device { bus: None, connected: false, permission: true }); // unknown bus: ignored
+        s.note(&Event::Error { message: "x".into() });
+        assert_eq!((s.battery, s.usb, s.bluetooth, s.active), (Some(83), Some(true), Some(true), Some(Bus::Bluetooth)));
+        s.note(&Event::Battery { percent: None });
+        s.note(&Event::Device { bus: Some(Bus::Bluetooth), connected: false, permission: true });
+        assert_eq!((s.battery, s.bluetooth), (None, Some(false)), "asleep: no stale battery");
+    }
 }

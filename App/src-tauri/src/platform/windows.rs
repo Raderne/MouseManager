@@ -125,7 +125,7 @@ struct State {
     devices: Vec<Device>,
     /// Raw device handle → (path, is a configured device). Entries are dropped on device arrival/removal:
     /// a Bluetooth mouse gets a new handle after every sleep, and Windows may reuse an old one for another mouse.
-    names: HashMap<isize, (String, bool)>,
+    names: HashMap<isize, (String, bool, Option<Bus>)>,
     all_devices: bool,
     click_from_target: bool,
     /// The device of the last raw click.
@@ -353,19 +353,19 @@ unsafe fn on_raw_input(lparam: LPARAM) {
         let device = raw.header.hDevice as isize;
         let flush = with(|s| {
             s.raw_count += 1;
-            let (path, target) = s
+            let (path, target, bus) = s
                 .names
                 .entry(device)
                 .or_insert_with(|| {
                     let path = device_name(device);
                     let target = matches_device(&path, &s.devices);
-                    (path, target)
+                    let bus = DeviceId::from_windows_path(&path).map(|id| id.bus);
+                    (path, target, bus)
                 })
                 .clone();
-            // Which link the N230 is using (receiver or Bluetooth): parsed only when the device changes.
+            // Which link the N230 is using (receiver or Bluetooth).
             if target && device != s.active_device {
                 s.active_device = device;
-                let bus = DeviceId::from_windows_path(&path).map(|id| id.bus);
                 if bus.is_some() && bus != s.active_bus {
                     s.active_bus = bus;
                     let _ = s.events.send(Event::Active { bus: bus.unwrap() });
@@ -388,7 +388,7 @@ unsafe fn on_raw_input(lparam: LPARAM) {
                 s.click_device = device;
                 if target || s.all_devices {
                     for (button, down) in button_changes(flags) {
-                        let _ = s.events.send(Event::Button { device: path.clone(), target, button: button.into(), down });
+                        let _ = s.events.send(Event::Button { device: path.clone(), target, button: button.into(), down, bus });
                     }
                 }
             }
@@ -420,15 +420,15 @@ unsafe fn on_device_change(arrival: bool, lparam: LPARAM) {
         let path = if arrival { device_name(device) } else { String::new() };
         let release = with(|s| {
             let gone = s.names.remove(&device);
-            let (path, target) = if arrival {
+            let (_, target, bus) = if arrival {
                 let target = matches_device(&path, &s.devices);
-                s.names.insert(device, (path.clone(), target));
-                (path, target)
+                let bus = DeviceId::from_windows_path(&path).map(|id| id.bus);
+                s.names.insert(device, (path.clone(), target, bus));
+                (path, target, bus)
             } else {
                 gone.unwrap_or_default()
             };
             if target {
-                let bus = DeviceId::from_windows_path(&path).map(|id| id.bus);
                 let _ = s.events.send(Event::Device { bus, connected: arrival, permission: true });
             }
             if arrival { Vec::new() } else { release_held(&mut s.held, &s.held_dev, device) }
