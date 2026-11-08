@@ -127,10 +127,11 @@ async fn bt_paired(state: State<'_, AppState>) -> Result<Vec<bt::PairedMouse>, S
     tauri::async_runtime::spawn_blocking(move || bt.paired()).await.map_err(|e| e.to_string())
 }
 
-/// Opens the OS Bluetooth settings (to switch the radio on: the app never does that itself).
+/// Opens the OS Bluetooth settings (`page` "bluetooth": switch the radio on, which the app never does
+/// itself) or the radio privacy settings (`page` "radios": when Windows denies this app the radio).
 #[tauri::command]
-fn bt_open_settings(state: State<AppState>) -> Result<(), String> {
-    state.bt.open_settings()
+fn bt_open_settings(page: String, state: State<AppState>) -> Result<(), String> {
+    state.bt.open_settings(&page)
 }
 
 #[tauri::command]

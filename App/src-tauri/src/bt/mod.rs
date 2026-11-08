@@ -7,7 +7,7 @@
 //! impl BtHandle {
 //!     pub fn adapter(&self) -> AdapterState;
 //!     pub fn scan(&self, on: bool) -> Result<(), String>;   // emits btScan / btFound, stops by itself after SCAN_SECS
-//!     pub fn open_settings(&self) -> Result<(), String>;    // the OS Bluetooth page; we never switch the radio ourselves
+//!     pub fn open_settings(&self, page: &str) -> Result<(), String>; // "bluetooth" | "radios"; we never switch the radio ourselves
 //!     pub fn pair(&self, address: &str) -> Result<Paired, String>;   // B4: blocks up to ~40 s; call off the UI thread
 //!     pub fn forget(&self, address: &str) -> Result<(), String>;     // B4: unpair in the OS
 //!     pub fn paired(&self) -> Vec<PairedMouse>;                      // B4: mice the OS has paired
@@ -40,6 +40,8 @@ pub enum AdapterState {
     On,
     Off,
     Missing,
+    /// The OS won't let this app use the radio (Windows: radio access turned off in Privacy settings).
+    Denied,
 }
 
 /// GAP appearance "HID Mouse".

@@ -20,7 +20,7 @@ impl BtHandle {
         Err("Bluetooth search isn't supported on this system yet".into())
     }
 
-    pub fn open_settings(&self) -> Result<(), String> {
+    pub fn open_settings(&self, _page: &str) -> Result<(), String> {
         Err("not supported on this system yet".into())
     }
 

@@ -397,7 +397,8 @@ let flowStep = 0; // 0 = flow closed
 const ADAPTER_TEXT = {
   on: "Bluetooth is on.",
   off: "Bluetooth is off. Turn it on in the Windows settings to add or use a Bluetooth mouse.",
-  missing: "No Bluetooth LE adapter found on this PC.",
+  missing: "No Bluetooth adapter found. If it was just disabled or unplugged, it's picked up again as soon as it's back.",
+  denied: "Windows doesn't let this app use Bluetooth. Allow it in Settings → Privacy & security → Radios.",
 };
 
 const LINK_TEXT = {
@@ -425,7 +426,9 @@ function sayScan(text, error = false) {
 
 function showAdapter(state) {
   $("bt-adapter").textContent = ADAPTER_TEXT[state] ?? "—";
-  $("bt-settings").hidden = state !== "off";
+  $("bt-settings").hidden = state !== "off" && state !== "denied";
+  $("bt-settings").textContent = state === "denied" ? "Open privacy settings" : "Open Bluetooth settings";
+  $("bt-settings").dataset.page = state === "denied" ? "radios" : "bluetooth";
   $("bt-add").disabled = state !== "on" && flowStep === 0;
 }
 
@@ -755,7 +758,9 @@ function setupBluetooth() {
   $("bt-flow").addEventListener("keydown", (e) => {
     if (e.key === "Escape") closeFlow();
   });
-  $("bt-settings").addEventListener("click", () => invoke("bt_open_settings").catch((e) => console.error(e)));
+  $("bt-settings").addEventListener("click", () =>
+    invoke("bt_open_settings", { page: $("bt-settings").dataset.page || "bluetooth" }).catch((e) => console.error(e))
+  );
   $("bt-all").addEventListener("change", renderBtFound);
   // The adapter can be switched on in Windows while this window is open.
   window.addEventListener("focus", () => invoke("bt_adapter").then(showAdapter).catch(() => {}));

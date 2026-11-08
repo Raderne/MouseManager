@@ -59,7 +59,7 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - Verified: `--watch` showed `Battery 83%` 2.2 s after connect; Windows' own `DEVPKEY_Bluetooth_Battery` read **83** at the same time. The DEVPKEY path wasn't needed, so it isn't built.
   - **Low-battery warning:** `bt::LowBattery` warns once below 15% and re-arms at ≥ 20% (so 14/15/14 jitter warns once); shown with **`tauri-plugin-notification` 2** (new dependency) if `lowBatteryWarning` is on. Not tested on the real mouse (needs < 15%).
   - The header ring + % follow `battery` events. `get_battery` returns the last value, so a page that loads after the first read still shows it.
-- **2026-11-08, B7 built on Windows** (`cargo test` 34 pass; hands-on check pending):
+- **2026-11-08, B7 done on Windows** (`cargo test` 34 pass). Hands-on by the user: Cancel closes the flow cleanly; the 4-step flow paired BT2; X1/X2 lit up on the Try-it step; cards for the receiver, BT1 and BT2 all show:
   - **Settings → Devices** replaces the old Devices + Bluetooth groups: "The N230 is using …" line, adapter line (+ Open Bluetooth settings when off), one **card** per receiver entry, per Bluetooth entry paired from the app (with address), and per mouse Windows paired on its own ("Paired in Windows"). Cards show status, battery (receiver: "— (not reported over the receiver)"), firmware, maker, address, and two-click **Forget** / **Remove from app**. The raw VID:PID editor moved into a collapsed **Advanced** `<details>`.
   - **Add Bluetooth mouse** flow, 4 steps with a step indicator: (1) switch to BT + pairing mode (light blinks; from the manual), (2) search list with Pair, (3) pairing progress ("Hide" lets it finish in the background), (4) "Try it": live **X1/X2** keys light up on `button {bus: bluetooth}` events. Cancel/Hide/Finish on every step; Escape closes; focus moves to each step's first button.
   - **Header:** `BT`/`USB` chip next to the battery ring from `active`. **Monitor:** button lines tagged `usb`/`bt`.
@@ -68,6 +68,11 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - **Bug found in B6 and fixed:** the header ring never filled. `ring.hidden = false` does nothing on an SVG `<circle>` (`.hidden` is HTML-only); now `toggleAttribute("hidden", …)`.
   - **Two Bluetooth channels:** `remember_bluetooth(id, address, name, still_paired)` reuses an entry only if it's this address, has none, or holds an address Windows no longer has paired (a re-pair of the same channel); otherwise it adds one, so pairing BT2 no longer overwrites BT1's card. `bt_pair` passes `bt.paired()` addresses.
   - Checked by capturing the app window (`PrintWindow` via a Windows PowerShell 5.1 script; PS7's Add-Type can't find `System.Drawing.Bitmap`).
+- **2026-11-08, B8 (Windows) in progress** (`cargo test` 34 pass):
+  - **Adapter hotplug/reset:** a `DeviceWatcher` on `BluetoothAdapter::GetDeviceSelector()` (kept in `Inner.adapters`, started in `bt::start`). On Added/Removed (Updated needs a handler too or Windows raises neither) → after 500 ms: re-subscribe the radio (`subscribe_radio`, which drops the old subscription), send `btAdapter`, and `drop_all_links` if not on. Before this the radio was subscribed once, so a reset/swapped adapter went unheard. Verified: `btAdapter on` at startup from the enumeration's Added.
+  - **Radio access:** `adapter_state` checks `Radio::RequestAccessAsync()`; not `Allowed` → new state **`denied`** with "Allow it in Settings → Privacy & security → Radios" and an "Open privacy settings" button. Desktop apps are normally allowed (it read allowed here).
+  - `bt_open_settings(page)` takes `bluetooth` | `radios` and refuses anything else, so page text never reaches `explorer.exe`.
+  - Release NSIS installer build: pending.
 - **Next (when work resumes):** finish B5's radio off/on + reboot checks, then **B6** (battery over Bluetooth: `DEVPKEY_Bluetooth_Battery` first, GATT `2A19` notifications as fallback; "—" while sleeping). B2–B5 code is not committed yet (only B0–B1 are, in "phase b1").
 
 ## Idea

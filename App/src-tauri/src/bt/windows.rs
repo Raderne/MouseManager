@@ -26,10 +26,10 @@ use windows::{
             },
         },
         Enumeration::{
-            DeviceInformation, DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel,
+            DeviceInformation, DeviceInformationCustomPairing, DeviceInformationUpdate, DeviceWatcher, DevicePairingKinds, DevicePairingProtectionLevel,
             DevicePairingRequestedEventArgs, DevicePairingResultStatus, DeviceUnpairingResultStatus,
         },
-        Radios::{Radio, RadioState},
+        Radios::{Radio, RadioAccessStatus, RadioState},
     },
     Foundation::TypedEventHandler,
     Storage::Streams::{DataReader, IBuffer},
@@ -61,12 +61,21 @@ struct Inner {
     battery_gen: u64,
     /// Last value sent, so `battery` goes out only on change. `None` = unknown ("—").
     battery_last: Option<u8>,
+    /// Watches Bluetooth adapters arriving and leaving (B8).
+    adapters: Option<DeviceWatcher>,
     /// Bumped on every start, so an old auto-stop timer can't stop a newer search.
     generation: u64,
 }
 
 pub fn start(events: Sender<Event>) -> BtHandle {
-    BtHandle { events, inner: Arc::default() }
+    let handle = BtHandle { events, inner: Arc::default() };
+    let (ev, st) = (handle.events.clone(), handle.inner.clone());
+    thread::spawn(move || {
+        if let Ok(w) = watch_adapters(ev, st.clone()) {
+            st.lock().unwrap().adapters = Some(w); // kept so it keeps watching
+        }
+    });
+    handle
 }
 
 /// Runs WinRT work on a fresh thread and waits for it: blocking `.get()` must not run on the UI (STA) thread.
@@ -81,6 +90,10 @@ fn adapter_state() -> windows::core::Result<AdapterState> {
     };
     if !adapter.IsLowEnergySupported()? {
         return Ok(AdapterState::Missing);
+    }
+    // Desktop apps are normally allowed; a "denied" here means Windows' radio privacy setting blocks us.
+    if Radio::RequestAccessAsync()?.get()? != RadioAccessStatus::Allowed {
+        return Ok(AdapterState::Denied);
     }
     let radio = adapter.GetRadioAsync()?.get()?;
     Ok(if radio.State()? == RadioState::On { AdapterState::On } else { AdapterState::Off })
@@ -134,6 +147,7 @@ impl BtHandle {
         match state {
             AdapterState::Missing => return Err("No Bluetooth LE adapter found.".into()),
             AdapterState::Off => return Err("Bluetooth is off.".into()),
+            AdapterState::Denied => return Err("Windows doesn't let this app use Bluetooth. Allow it in Settings → Privacy & security → Radios.".into()),
             AdapterState::On => {}
         }
         stop_watcher(&self.inner, &self.events, None); // restart cleanly if a search is already running
@@ -191,8 +205,15 @@ impl BtHandle {
         Ok(())
     }
 
-    pub fn open_settings(&self) -> Result<(), String> {
-        std::process::Command::new("explorer.exe").arg("ms-settings:bluetooth").spawn().map(|_| ()).map_err(|e| e.to_string())
+    /// `page`: "bluetooth" (radio off) or "radios" (radio access denied). Anything else is refused,
+    /// so nothing from the page ever reaches `explorer.exe` as-is.
+    pub fn open_settings(&self, page: &str) -> Result<(), String> {
+        let uri = match page {
+            "bluetooth" => "ms-settings:bluetooth",
+            "radios" => "ms-settings:privacy-radios",
+            other => return Err(format!("unknown settings page '{other}'")),
+        };
+        std::process::Command::new("explorer.exe").arg(uri).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
 
     /// Pairs with "just works" (confirm only), as mice do. A PIN request fails with a message instead
@@ -387,39 +408,86 @@ fn watch_blocking(addrs: Vec<u64>, events: Sender<Event>, inner: Arc<Mutex<Inner
     inner.lock().unwrap().links = links;
 
     if inner.lock().unwrap().radio.is_none() {
-        let radio = BluetoothAdapter::GetDefaultAsync()
-            .map_err(|e| e.message())
-            .and_then(|op| wait(op, 5, "finding the adapter"))
-            .and_then(|a| a.GetRadioAsync().map_err(|e| e.message()))
-            .and_then(|op| wait(op, 5, "finding the radio"));
-        if let Ok(radio) = radio {
-            let (ev, st) = (events.clone(), inner.clone());
-            let token = radio.StateChanged(&TypedEventHandler::new(move |r: Ref<Radio>, _: Ref<IInspectable>| {
-                if let Some(r) = r.as_ref() {
-                    let state = if r.State()? == RadioState::On { AdapterState::On } else { AdapterState::Off };
-                    let _ = ev.send(Event::BtAdapter { state });
-                    if state == AdapterState::Off {
-                        // Windows doesn't raise ConnectionStatusChanged while the radio is off (seen 2026-11-08:
-                        // the link only changed when it came back on), so every watched mouse drops here.
-                        {
-                            let mut g = st.lock().unwrap();
-                            let addrs: Vec<u64> = g.links.iter().filter_map(|(d, _)| d.BluetoothAddress().ok()).collect();
-                            for addr in addrs {
-                                if let Some(s) = g.link_states.update(addr, true, false) {
-                                    let _ = ev.send(link_event(addr, s));
-                                }
-                            }
-                        }
-                        stop_battery(&st, &ev);
-                    }
-                }
-                Ok(())
-            }));
-            if let Ok(token) = token {
-                inner.lock().unwrap().radio = Some((radio, token));
+        subscribe_radio(&events, &inner);
+    }
+}
+
+/// Every watched mouse is down: the radio went off or the adapter left. Windows raises no
+/// ConnectionStatusChanged while the radio is off (seen 2026-11-08), so we report it ourselves.
+fn drop_all_links(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>) {
+    {
+        let mut g = inner.lock().unwrap();
+        let addrs: Vec<u64> = g.links.iter().filter_map(|(d, _)| d.BluetoothAddress().ok()).collect();
+        for addr in addrs {
+            if let Some(s) = g.link_states.update(addr, true, false) {
+                let _ = events.send(link_event(addr, s));
             }
         }
     }
+    stop_battery(inner, events);
+}
+
+/// (Re)subscribes to the default adapter's radio (Bluetooth switched off/on). Called at the first
+/// watch and whenever an adapter arrives or leaves, so a reset or swapped adapter is followed too.
+fn subscribe_radio(events: &Sender<Event>, inner: &Arc<Mutex<Inner>>) {
+    if let Some((old, token)) = inner.lock().unwrap().radio.take() {
+        let _ = old.RemoveStateChanged(token);
+    }
+    let radio = BluetoothAdapter::GetDefaultAsync()
+        .map_err(|e| e.message())
+        .and_then(|op| wait(op, 5, "finding the adapter"))
+        .and_then(|a| a.GetRadioAsync().map_err(|e| e.message()))
+        .and_then(|op| wait(op, 5, "finding the radio"));
+    let Ok(radio) = radio else { return };
+    let (ev, st) = (events.clone(), inner.clone());
+    let token = radio.StateChanged(&TypedEventHandler::new(move |r: Ref<Radio>, _: Ref<IInspectable>| {
+        if let Some(r) = r.as_ref() {
+            let state = if r.State()? == RadioState::On { AdapterState::On } else { AdapterState::Off };
+            let _ = ev.send(Event::BtAdapter { state });
+            if state == AdapterState::Off {
+                drop_all_links(&st, &ev);
+            }
+        }
+        Ok(())
+    }));
+    if let Ok(token) = token {
+        inner.lock().unwrap().radio = Some((radio, token));
+    }
+}
+
+/// Watches Bluetooth adapters coming and going (a USB Bluetooth dongle, an adapter disabled or reset in
+/// Device Manager). On any change: follow the new radio, report the adapter state, drop links if it's gone.
+fn watch_adapters(events: Sender<Event>, inner: Arc<Mutex<Inner>>) -> windows::core::Result<DeviceWatcher> {
+    let watcher = DeviceInformation::CreateWatcherAqsFilter(&BluetoothAdapter::GetDeviceSelector()?)?;
+    let changed = {
+        let (events, inner) = (events.clone(), inner.clone());
+        move || {
+            let (ev, st) = (events.clone(), inner.clone());
+            thread::spawn(move || {
+                // A moment for the adapter to settle (a re-enabled adapter reports Missing for a beat).
+                thread::sleep(Duration::from_millis(500));
+                subscribe_radio(&ev, &st);
+                let state = adapter_state().unwrap_or(AdapterState::Missing);
+                let _ = ev.send(Event::BtAdapter { state });
+                if state != AdapterState::On {
+                    drop_all_links(&st, &ev);
+                }
+            });
+        }
+    };
+    let (on_add, on_remove) = (changed.clone(), changed);
+    watcher.Added(&TypedEventHandler::new(move |_: Ref<DeviceWatcher>, _: Ref<DeviceInformation>| {
+        on_add();
+        Ok(())
+    }))?;
+    watcher.Removed(&TypedEventHandler::new(move |_: Ref<DeviceWatcher>, _: Ref<DeviceInformationUpdate>| {
+        on_remove();
+        Ok(())
+    }))?;
+    // Windows only raises Added/Removed when Updated has a handler too.
+    watcher.Updated(&TypedEventHandler::new(|_: Ref<DeviceWatcher>, _: Ref<DeviceInformationUpdate>| Ok(())))?;
+    watcher.Start()?;
+    Ok(watcher)
 }
 
 /// Waits for a WinRT async operation without `.get()`, so it can give up: a mouse that leaves pairing

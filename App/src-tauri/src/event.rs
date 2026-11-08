@@ -78,6 +78,7 @@ mod tests {
             json!({ "type": "btFound", "address": "FE:46:E9:24:04:91", "name": "Lenovo Services N230 BT1", "rssi": -68, "bars": 3, "mouse": true, "n230": true })
         );
         assert_eq!(serde_json::to_value(Event::BtAdapter { state: AdapterState::Off }).unwrap(), json!({ "type": "btAdapter", "state": "off" }));
+        assert_eq!(serde_json::to_value(Event::BtAdapter { state: AdapterState::Denied }).unwrap(), json!({ "type": "btAdapter", "state": "denied" }));
         assert_eq!(serde_json::to_value(Event::BtScan { active: false }).unwrap(), json!({ "type": "btScan", "active": false }));
         assert_eq!(serde_json::to_value(Event::Active { bus: Bus::Usb }).unwrap(), json!({ "type": "active", "bus": "usb" }));
     }
