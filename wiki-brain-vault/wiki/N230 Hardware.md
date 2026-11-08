@@ -2,6 +2,16 @@
 
 Measured on 2026-10-19 with `Monitor\…\MouseManager.exe --log` and the Monitor window. None of this is documented by Lenovo.
 
+## From the product manual (2026-11-08)
+
+The user added `mouse info.md` (repo root, Lenovo's spec sheet + manual text). Facts:
+
+- Sensor **PAW3212** (PixArt), "6D" buttons, connection **2.4G + Bluetooth**, a **mode switch on the bottom** (2.4G / BT).
+- DPI levels **1000 / 1200 / 1600**, cycled by the DPI button.
+- Battery **500 mAh lithium**, charged over **USB-C**.
+
+> **Contradiction (not resolved):** our measurements were **~1424 DPI** (two 10 cm slides, 2026-10-19) and **~795** after a possible DPI-button press ([[DPI Measurement]]). Neither is one of the manual's levels. Possible causes: slide length not exactly 10 cm, Windows pointer settings, the manual being generic, or a firmware that differs from the spec. Re-measure at each DPI-button step to settle it.
+
 ## 2.4G dongle
 
 - USB **`VID_3554&PID_FC01`**, product string "Lenovo Services N230" (Compx chip).

@@ -107,3 +107,12 @@ Touched: Bluetooth Connection
 
 ## [2026-11-07 19:10] session | B5 checks, active-link UI fix
 Touched: Bluetooth Connection
+
+## [2026-11-08 10:30] session | Manual DPI conflict, B5 radio-off fix
+Touched: N230 Hardware, DPI Measurement, Bluetooth Connection
+
+## [2026-11-08 10:45] session | B5 radio-off fix verified
+Touched: Bluetooth Connection
+
+## [2026-11-08 11:20] session | B6 Bluetooth battery built (Windows)
+Touched: Bluetooth Connection, Battery Reading, index

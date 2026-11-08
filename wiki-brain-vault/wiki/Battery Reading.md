@@ -1,6 +1,8 @@
 # Battery Reading
 
-**Status: open question.** It's not yet known whether the PC can read the N230's battery level.
+~~**Status: open question.**~~ (superseded below)
+
+**Status (2026-11-08): solved over Bluetooth, built in the app (B6).** Over the receiver the battery is still unknown and the app shows "—". See [[Bluetooth Connection]] → B6.
 
 ## Bluetooth answers it (2026-11-07)
 

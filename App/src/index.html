@@ -30,7 +30,7 @@
         <button class="pill" role="tab" id="tab-settings" aria-controls="settings" aria-selected="false">Settings</button>
       </nav>
 
-      <!-- Battery stays "—" with an empty ring until Phase 7 reads a real value. -->
+      <!-- Battery: read over Bluetooth (B6). "—" with an empty ring whenever it isn't known. -->
       <div class="pill-box">
         <svg class="gauge" width="40" height="40" viewBox="0 0 44 44" aria-hidden="true">
           <circle class="track" cx="22" cy="22" r="18" />
@@ -148,7 +148,7 @@
           </div>
         </div>
         <div class="eventlist" id="eventlist" role="log" aria-label="Mouse events"></div>
-        <p class="muted">Settings report: <span class="mono" id="settings-report">—</span> <span class="muted">(battery phase pending)</span></p>
+        <p class="muted">Settings report: <span class="mono" id="settings-report">—</span> <span class="muted">(receiver only; not read yet)</span></p>
       </section>
       <section id="settings" role="tabpanel" aria-labelledby="tab-settings" class="card" hidden>
         <div>

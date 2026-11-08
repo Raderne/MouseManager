@@ -20,7 +20,10 @@ use windows::{
                 BluetoothLEAdvertisementWatcherStoppedEventArgs, BluetoothLEScanningMode,
             },
             BluetoothAdapter, BluetoothAddressType, BluetoothCacheMode, BluetoothConnectionStatus, BluetoothLEDevice,
-            GenericAttributeProfile::{GattCharacteristicUuids, GattCommunicationStatus, GattServiceUuids},
+            GenericAttributeProfile::{
+                GattCharacteristic, GattCharacteristicUuids, GattClientCharacteristicConfigurationDescriptorValue, GattCommunicationStatus,
+                GattServiceUuids, GattValueChangedEventArgs,
+            },
         },
         Enumeration::{
             DeviceInformation, DeviceInformationCustomPairing, DevicePairingKinds, DevicePairingProtectionLevel,
@@ -52,6 +55,12 @@ struct Inner {
     link_states: Links,
     /// The adapter's radio and its StateChanged token: Bluetooth switched off/on in Windows.
     radio: Option<(Radio, i64)>,
+    /// The Battery Level characteristic we're subscribed to (B6), and its ValueChanged token.
+    battery: Option<(GattCharacteristic, i64)>,
+    /// Bumped on every battery start/stop, so a slow read that finishes after a disconnect is dropped.
+    battery_gen: u64,
+    /// Last value sent, so `battery` goes out only on change. `None` = unknown ("—").
+    battery_last: Option<u8>,
     /// Bumped on every start, so an old auto-stop timer can't stop a newer search.
     generation: u64,
 }
@@ -224,8 +233,96 @@ fn link_event(addr: u64, state: LinkState) -> Event {
 fn report_link(dev: &BluetoothLEDevice, addr: u64, events: &Sender<Event>, inner: &Arc<Mutex<Inner>>) {
     let connected = dev.ConnectionStatus().is_ok_and(|s| s == BluetoothConnectionStatus::Connected);
     let paired = dev.DeviceInformation().and_then(|i| i.Pairing()).and_then(|p| p.IsPaired()).unwrap_or(false);
-    if let Some(state) = inner.lock().unwrap().link_states.update(addr, paired, connected) {
+    let state = inner.lock().unwrap().link_states.update(addr, paired, connected);
+    if let Some(state) = state {
         let _ = events.send(link_event(addr, state));
+        if state == LinkState::Connected {
+            let (dev, ev, st) = (dev.clone(), events.clone(), inner.clone());
+            thread::spawn(move || start_battery(dev, ev, st)); // GATT reads take a moment: not on the event thread
+        } else {
+            stop_battery(inner, events); // asleep or off: "—", never the last number
+        }
+    }
+}
+
+/// Sends `battery` if the value changed.
+fn set_battery(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>, percent: Option<u8>) {
+    let mut g = inner.lock().unwrap();
+    if g.battery_last != percent {
+        g.battery_last = percent;
+        let _ = events.send(Event::Battery { percent });
+    }
+}
+
+fn stop_battery(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>) {
+    let old = {
+        let mut g = inner.lock().unwrap();
+        g.battery_gen += 1;
+        g.battery.take()
+    };
+    if let Some((ch, token)) = old {
+        let _ = ch.RemoveValueChanged(token);
+    }
+    set_battery(inner, events, None);
+}
+
+/// The standard Battery Service (B0: `180F`/`2A19`, Read + Notify; Windows lets apps use it on a HID
+/// mouse, only `1812` is blocked). Reads once, then subscribes so changes arrive without polling.
+fn start_battery(dev: BluetoothLEDevice, events: Sender<Event>, inner: Arc<Mutex<Inner>>) {
+    let mine = {
+        let mut g = inner.lock().unwrap();
+        g.battery_gen += 1;
+        g.battery_gen
+    };
+    let current = |st: &Arc<Mutex<Inner>>| st.lock().unwrap().battery_gen == mine;
+    let result = (|| -> Result<(), String> {
+        let e = |e: windows::core::Error| e.message();
+        let services = wait(
+            dev.GetGattServicesForUuidWithCacheModeAsync(GattServiceUuids::Battery().map_err(e)?, BluetoothCacheMode::Uncached).map_err(e)?,
+            10,
+            "finding the battery service",
+        )?;
+        let service = services.Services().map_err(e)?.GetAt(0).map_err(e)?;
+        let chars = wait(service.GetCharacteristicsForUuidAsync(GattCharacteristicUuids::BatteryLevel().map_err(e)?).map_err(e)?, 10, "finding the battery level")?;
+        let ch = chars.Characteristics().map_err(e)?.GetAt(0).map_err(e)?;
+        let read = wait(ch.ReadValueWithCacheModeAsync(BluetoothCacheMode::Uncached).map_err(e)?, 10, "reading the battery")?;
+        if read.Status().map_err(e)? != GattCommunicationStatus::Success {
+            return Err("battery level unreadable".into());
+        }
+        let percent = *buffer_bytes(&read.Value().map_err(e)?)?.first().ok_or("empty battery value")?;
+        if !current(&inner) {
+            return Ok(()); // disconnected while we were reading
+        }
+        set_battery(&inner, &events, Some(percent.min(100)));
+
+        let (ev, st) = (events.clone(), inner.clone());
+        let token = ch
+            .ValueChanged(&TypedEventHandler::new(move |_: Ref<GattCharacteristic>, args: Ref<GattValueChangedEventArgs>| {
+                if let Some(a) = args.as_ref() {
+                    if let Some(p) = buffer_bytes(&a.CharacteristicValue()?).ok().and_then(|b| b.first().copied()) {
+                        set_battery(&st, &ev, Some(p.min(100)));
+                    }
+                }
+                Ok(())
+            }))
+            .map_err(e)?;
+        let _ = wait(
+            ch.WriteClientCharacteristicConfigurationDescriptorAsync(GattClientCharacteristicConfigurationDescriptorValue::Notify).map_err(e)?,
+            10,
+            "subscribing to the battery",
+        ); // without notifications we still have the first read; the next connect reads again
+        let mut g = inner.lock().unwrap();
+        if g.battery_gen == mine {
+            g.battery = Some((ch, token));
+        } else {
+            let _ = ch.RemoveValueChanged(token);
+        }
+        Ok(())
+    })();
+    if let Err(msg) = result {
+        if current(&inner) {
+            let _ = events.send(Event::Error { message: format!("Battery: {msg}") });
+        }
     }
 }
 
@@ -235,6 +332,7 @@ fn watch_blocking(addrs: Vec<u64>, events: Sender<Event>, inner: Arc<Mutex<Inner
     for (dev, token) in old {
         let _ = dev.RemoveConnectionStatusChanged(token);
     }
+    stop_battery(&inner, &events); // the connected mouse in the new list starts it again
     inner.lock().unwrap().link_states.keep(&addrs);
 
     let mut links = Vec::new();
@@ -267,11 +365,25 @@ fn watch_blocking(addrs: Vec<u64>, events: Sender<Event>, inner: Arc<Mutex<Inner
             .and_then(|a| a.GetRadioAsync().map_err(|e| e.message()))
             .and_then(|op| wait(op, 5, "finding the radio"));
         if let Ok(radio) = radio {
-            let ev = events.clone();
+            let (ev, st) = (events.clone(), inner.clone());
             let token = radio.StateChanged(&TypedEventHandler::new(move |r: Ref<Radio>, _: Ref<IInspectable>| {
                 if let Some(r) = r.as_ref() {
                     let state = if r.State()? == RadioState::On { AdapterState::On } else { AdapterState::Off };
                     let _ = ev.send(Event::BtAdapter { state });
+                    if state == AdapterState::Off {
+                        // Windows doesn't raise ConnectionStatusChanged while the radio is off (seen 2026-11-08:
+                        // the link only changed when it came back on), so every watched mouse drops here.
+                        {
+                            let mut g = st.lock().unwrap();
+                            let addrs: Vec<u64> = g.links.iter().filter_map(|(d, _)| d.BluetoothAddress().ok()).collect();
+                            for addr in addrs {
+                                if let Some(s) = g.link_states.update(addr, true, false) {
+                                    let _ = ev.send(link_event(addr, s));
+                                }
+                            }
+                        }
+                        stop_battery(&st, &ev);
+                    }
                 }
                 Ok(())
             }));

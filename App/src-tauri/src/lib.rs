@@ -10,7 +10,7 @@ use event::Event;
 use tauri_plugin_autostart::ManagerExt;
 use std::{
     path::PathBuf,
-    sync::{mpsc, Mutex},
+    sync::{mpsc, Arc, Mutex},
     thread,
     time::{Duration, Instant},
 };
@@ -26,6 +26,14 @@ struct AppState {
     path: PathBuf,
     backend: platform::Handle,
     bt: bt::BtHandle,
+    /// The last `battery` value sent, for a page that loads after it (`None` = "—").
+    battery: Arc<Mutex<Option<u8>>>,
+}
+
+/// The battery % as last reported (B6), or `None` while unknown.
+#[tauri::command]
+fn get_battery(state: State<AppState>) -> Option<u8> {
+    *state.battery.lock().unwrap()
 }
 
 /// The Bluetooth addresses to watch for link state (B5): configured Bluetooth devices paired from the app.
@@ -270,6 +278,20 @@ fn theme_script(theme: &str) -> String {
     )
 }
 
+/// One OS notification when the battery drops below 15%, if "Low battery warning" is on (Settings).
+fn low_battery_notice(app: &AppHandle, percent: u8) {
+    use tauri_plugin_notification::NotificationExt;
+    let enabled = app.try_state::<AppState>().is_some_and(|s| s.config.lock().unwrap().low_battery_warning);
+    if enabled {
+        let _ = app
+            .notification()
+            .builder()
+            .title("N230 battery low")
+            .body(format!("{percent}% left. Charge it with the USB-C cable."))
+            .show();
+    }
+}
+
 fn show_main(app: &AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
@@ -287,6 +309,7 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             set_theme,
             get_config,
@@ -303,7 +326,8 @@ pub fn run() {
             bt_open_settings,
             bt_pair,
             bt_forget,
-            bt_paired
+            bt_paired,
+            get_battery
         ])
         .setup(|app| {
             let path = app.path().app_config_dir()?.join("config.json");
@@ -324,12 +348,21 @@ pub fn run() {
             let backend = platform::start(config.clone(), tx);
             backend.set_scale(config.scale());
             let handle = app.handle().clone();
+            let battery = Arc::new(Mutex::new(None));
+            let last_battery = battery.clone();
             thread::spawn(move || {
+                let mut low = bt::LowBattery::default();
                 for ev in rx {
+                    if let Event::Battery { percent } = ev {
+                        *last_battery.lock().unwrap() = percent;
+                        if percent.is_some_and(|p| low.check(p)) {
+                            low_battery_notice(&handle, percent.unwrap());
+                        }
+                    }
                     let _ = handle.emit("n230", ev);
                 }
             });
-            app.manage(AppState { config: Mutex::new(config), path, backend, bt });
+            app.manage(AppState { config: Mutex::new(config), path, backend, bt, battery });
 
             let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
             let exit = MenuItem::with_id(app, "exit", "Exit", true, None::<&str>)?;

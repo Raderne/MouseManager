@@ -131,6 +131,32 @@ impl Links {
     }
 }
 
+/// Warn below this battery %.
+pub const LOW_BATTERY: u8 = 15;
+/// Re-arm the warning once the battery is back at or above this (charged), so 14/15/14 jitter warns once.
+pub const LOW_BATTERY_REARM: u8 = 20;
+
+/// "Notify once below 15%" (Settings): `check` is true the first time the battery drops below
+/// `LOW_BATTERY`, then not again until it has been back up to `LOW_BATTERY_REARM`.
+#[derive(Default)]
+pub struct LowBattery {
+    warned: bool,
+}
+
+impl LowBattery {
+    pub fn check(&mut self, percent: u8) -> bool {
+        if percent >= LOW_BATTERY_REARM {
+            self.warned = false;
+            false
+        } else if percent < LOW_BATTERY && !self.warned {
+            self.warned = true;
+            true
+        } else {
+            false
+        }
+    }
+}
+
 pub fn is_n230(name: &str) -> bool {
     name.to_ascii_uppercase().contains("N230")
 }
@@ -236,6 +262,17 @@ mod tests {
         for bad in ["", "FE:46:E9:24:04", "FE:46:E9:24:04:91:00", "FE:46:E9:24:04:9", "FE:46:E9:24:04:GG", "FE46E9240491"] {
             assert_eq!(parse_address(bad), None, "{bad}");
         }
+    }
+
+    #[test]
+    fn low_battery_warns_once() {
+        let mut w = LowBattery::default();
+        assert!(!w.check(83) && !w.check(15), "15% is not below 15%");
+        assert!(w.check(14), "first drop below 15%");
+        assert!(!w.check(13) && !w.check(15) && !w.check(14), "jitter around the line: no repeat");
+        assert!(!w.check(19), "19% doesn't re-arm");
+        assert!(!w.check(20), "charged back up: re-armed, nothing to say");
+        assert!(w.check(9), "next drop warns again");
     }
 
     #[test]

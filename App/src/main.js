@@ -195,7 +195,20 @@ $("monitor-copy").addEventListener("click", () =>
   navigator.clipboard.writeText([...eventList.children].map((d) => d.textContent).join("\n")).catch(() => console.error("copy failed"))
 );
 
+// Header battery: a real % from Rust, or "—" with an empty ring while unknown (asleep, on the receiver, Bluetooth off).
+const BATTERY_C = 2 * Math.PI * 18; // the ring's r = 18
+function renderBattery(percent) {
+  const known = typeof percent === "number";
+  $("battery").textContent = known ? `${percent}%` : "—";
+  const ring = $("battery-ring");
+  ring.hidden = !known;
+  if (known) ring.setAttribute("stroke-dasharray", `${(BATTERY_C * percent) / 100} ${BATTERY_C}`);
+}
+
+invoke("get_battery").then(renderBattery).catch(() => renderBattery(null)); // in case it was read before this page loaded
+
 listen("n230", ({ payload: ev }) => {
+  if (ev.type === "battery") renderBattery(ev.percent);
   if (ev.type.startsWith("bt") || ["device", "link", "active"].includes(ev.type)) {
     onBtEvent(ev);
     if (ev.type === "btFound" && !ev.mouse && !$("all-devices").checked) return; // keep the monitor about mice

@@ -50,3 +50,7 @@ The target stages (Native / 400 / 800 / 1200 / 1600) scale the N230's movement b
 - **Pointer precision:** accepted as is. With "Enhance pointer precision" on, a scaled-down N230 behaves like a lower-DPI mouse, so expect less than the exact ratio.
 
 Related: [[Tauri Rewrite]] (Phase 6), [[Design System]] (dial).
+
+## Manual vs measured (2026-11-08)
+
+The product manual says the DPI button cycles **1000 / 1200 / 1600** ([[N230 Hardware]] → From the product manual). Our readings (~1424, ~795) match none of them. **Unresolved:** re-measure at each button step before trusting either.
