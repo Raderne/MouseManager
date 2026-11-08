@@ -10,7 +10,7 @@ The user added `mouse info.md` (repo root, Lenovo's spec sheet + manual text). F
 - DPI levels **1000 / 1200 / 1600**, cycled by the DPI button.
 - Battery **500 mAh lithium**, charged over **USB-C**.
 
-> **Contradiction (not resolved):** our measurements were **~1424 DPI** (two 10 cm slides, 2026-10-19) and **~795** after a possible DPI-button press ([[DPI Measurement]]). Neither is one of the manual's levels. Possible causes: slide length not exactly 10 cm, Windows pointer settings, the manual being generic, or a firmware that differs from the spec. Re-measure at each DPI-button step to settle it.
+> **Resolved (2026-11-08): the levels are the manual's 1000 / 1200 / 1600.** Measured at each DPI-button step (app's Performance meter, raw counts, 10 cm slides on a ruler, receiver): step 1 ≈ 800–890, step 2 ≈ 1159–1243, step 3 ≈ 1515–1595. Steps 2 and 3 match the manual. Step 1 read low; **the user attributes that to slide error and accepts 1000** (not rechecked). The old ~1424 (5605/5604 counts) is probably the 1600 step with slides shorter than 10 cm; that's a guess. See [[DPI Measurement]].
 
 ## 2.4G dongle
 

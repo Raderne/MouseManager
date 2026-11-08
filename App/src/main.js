@@ -1,4 +1,4 @@
-import { Meter } from "./dpi.js";
+import { Meter, LEVELS, snapLevel, confirmLevel } from "./dpi.js";
 import { cardModels, cardState, batteryText } from "./devices.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -113,8 +113,12 @@ function renderDpi() {
   const ring = $("dial-ring");
   ring.toggleAttribute("hidden", !effective); // SVG elements have no .hidden property
   ring.setAttribute("stroke-dasharray", `${(DIAL_C * Math.min(effective ?? 0, DIAL_MAX)) / DIAL_MAX} ${DIAL_C}`);
-  $("hw-dpi").textContent = measured ? Math.round(measured) : "—";
-  for (const b of document.querySelectorAll(".stage")) {
+  // A value saved by the old free-form meter (e.g. 752) isn't a level: say so instead of quietly scaling from it.
+  $("hw-dpi").textContent = !measured ? "pick a level" : LEVELS.includes(measured) ? `${measured} DPI` : `${Math.round(measured)} DPI (old reading: pick a level)`;
+  for (const b of document.querySelectorAll(".stage.level")) {
+    b.setAttribute("aria-pressed", String(Number(b.dataset.level) === measured));
+  }
+  for (const b of document.querySelectorAll(".stage:not(.level)")) {
     b.disabled = measured === null;
     b.setAttribute("aria-pressed", String((Number(b.dataset.dpi) || null) === target));
   }
@@ -126,7 +130,7 @@ const saveDpi = () =>
   invoke("set_dpi", { measured, target }).catch((e) => ($("measure-status").textContent = String(e)));
 const slideCm = () => Math.max(1, Number($("cm").value) || 10);
 
-for (const b of document.querySelectorAll(".stage")) {
+for (const b of document.querySelectorAll(".stage:not(.level)")) {
   b.addEventListener("click", () => {
     target = Number(b.dataset.dpi) || null;
     saveDpi();
@@ -134,13 +138,28 @@ for (const b of document.querySelectorAll(".stage")) {
   });
 }
 
+// The mouse's own DPI level: picked by the user (the PC can't see the button) or confirmed by a ruler check.
+function setLevel(level) {
+  measured = level;
+  meter.last = level;
+  saveDpi(); // re-scales the current pointer-speed stage
+  renderDpi();
+}
+for (const b of document.querySelectorAll(".stage.level")) {
+  b.addEventListener("click", () => {
+    setLevel(Number(b.dataset.level));
+    $("measure-status").textContent = `Mouse set to ${b.dataset.level} DPI. If you press its DPI button, pick the new level here.`;
+  });
+}
+
 $("measure").addEventListener("click", () => {
   measuring = !measuring;
   meter.reset();
+  meter.recent = [];
   $("measure").setAttribute("aria-pressed", measuring);
-  $("measure").textContent = measuring ? "Stop measuring" : "Measure DPI";
+  $("measure").textContent = measuring ? "Stop checking" : "Check with a ruler";
   $("measure-status").textContent = measuring
-    ? `Slide the N230 ${slideCm()} cm in a straight line and stop. Do it twice.`
+    ? `Slide the N230 ${slideCm()} cm along a ruler and stop. Two slides that land on the same level set it.`
     : "";
 });
 
@@ -231,16 +250,20 @@ setInterval(() => {
   const r = meter.tick(performance.now(), slideCm());
   if (!r) return;
   const status = $("measure-status");
+  const level = r.ignored ? null : confirmLevel(meter.recent);
   if (r.ignored) {
     status.textContent = "Too short, ignored. Slide the full distance.";
-  } else if (!r.confirmed) {
-    status.textContent = `Slide: ${Math.round(r.dpi)} DPI. Slide again to confirm.`;
+  } else if (level) {
+    status.textContent =
+      level === measured
+        ? `Checked: the mouse is on ${level} DPI (slides ${meter.recent.slice(0, 2).map(Math.round).join(", ")}).`
+        : `The mouse is on ${level} DPI${measured ? ` (was set to ${Math.round(measured)})` : ""}.`;
+    setLevel(level);
+    meter.recent = []; // the next check starts fresh
+  } else if (snapLevel(r.dpi) === null) {
+    status.textContent = `Slide: ${Math.round(r.dpi)} DPI, not near 1000, 1200 or 1600. Check the distance and slide again.`;
   } else {
-    status.textContent = r.changed
-      ? `DPI changed: now ${Math.round(r.confirmed)} (was ${Math.round(measured)}).`
-      : `Measured ${Math.round(r.confirmed)} DPI.`;
-    measured = r.confirmed;
-    saveDpi(); // a new hardware DPI re-scales the current stage
+    status.textContent = `Slide: ${Math.round(r.dpi)} DPI → ${snapLevel(r.dpi)}. Slide again to confirm.`;
   }
   renderDpi();
 }, 100);

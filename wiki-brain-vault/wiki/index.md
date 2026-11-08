@@ -18,7 +18,7 @@ Catalogue of every page in this wiki. Maintained by Claude.
 - [[Windows Input Backend]]: low-level hook + Raw Input on one window, so only the N230's clicks are blocked and remapped.
 - [[Linux Input Backend]]: take exclusive control of the N230 (evdev grab) and re-send through a virtual uinput device; udev permissions.
 - [[DPI Measurement]]: DPI from counts ÷ inches, the short-slide bug, and software DPI scaling.
-- [[Battery Reading]]: solved over Bluetooth (standard Battery Service, shown in the app since B6); still unknown over the receiver.
+- [[Battery Reading]]: solved over Bluetooth (standard Battery Service, shown in the app since B6); not readable over the receiver (checked 4 ways).
 - [[Bluetooth Connection]]: planned phases B0–B9 to find, pair and remap the N230 over Bluetooth, and read battery/link state.
 - [[Design System]]: Pulse layout, 5 color themes as CSS variables, and the design canvas link.
 

@@ -122,3 +122,21 @@ Touched: Bluetooth Connection
 
 ## [2026-11-08 13:30] session | B9 tests, checklist, two-channel battery fix
 Touched: Bluetooth Connection
+
+## [2026-11-08 14:10] session | Bluetooth stutter measured, battery re-watch fix
+Touched: Bluetooth Connection
+
+## [2026-11-08 14:45] session | Bluetooth stutter A/B: app cleared
+Touched: Bluetooth Connection
+
+## [2026-11-08 13:00] session | Receiver battery: closed, not readable
+Touched: Battery Reading, index
+
+## [2026-11-08 13:20] session | DPI measured per button step (800/1200/1600)
+Touched: N230 Hardware, DPI Measurement
+
+## [2026-11-08 13:30] session | DPI levels settled: 1000/1200/1600 (user call)
+Touched: N230 Hardware, DPI Measurement
+
+## [2026-11-08 13:50] session | Hardware DPI not settable; Performance level picker
+Touched: DPI Measurement

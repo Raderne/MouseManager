@@ -79,6 +79,25 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - `--watch` takes a comma-separated list, watched in order (e.g. BT2 then BT1, the order that broke).
   - **`App/STEPS.md`** got a "Bluetooth phases (B0–B9)" section and 9 Bluetooth items in the Final checklist, each noting where it passed on Windows.
   - Still open: the two-channel battery fix needs a live check (mouse on BT1 with BT2 paired); B5 reboot; B8 installed app + adapter disable/enable; a second-BT-mouse check; everything Linux.
+- **2026-11-08, choppy pointer and drop-outs over Bluetooth (investigation):**
+  - The user's Monitor log showed the link dropping 2–6 s after clicks and reconnect/drop within 50 ms, so **not idle sleep**. Windows' System log had **no** BTHUSB/BthLE errors at those times.
+  - **Measured** with a passive Raw Input tool (scratch `ratespike`, no hook, no GATT): moving continuously over Bluetooth, **app closed**: median report gap **8.8 ms** (matches the mouse's preferred 8.75 ms interval), p99 **113 ms**, **18 stalls > 120 ms** in 2,084 reports, no drop-out in 2 min. **So the stutter exists without N230 Control:** it's the radio link.
+  - App open (same tool, ~70 s of BT because the mouse only connected at 49.9 s; no receiver data): p99 166 ms, 46 stalls > 120 ms in 2,781 reports. About 2× worse per report, but not a fair A/B (different motion, time, Wi-Fi load). **Open: a back-to-back A/B** before blaming or clearing the app. What the app does to a connected BT mouse: a battery-notification subscription and one Device Information read per connection; no scanning unless Search is open; software DPI scaling is off (`targetDpi` null), so the hook passes moves through.
+  - Likely causes on this PC: the **Intel AX201 is one chip for Wi-Fi and Bluetooth sharing an antenna**; Wi-Fi was up at only 49 Mbps (band unknown: `netsh wlan` needs Location permission). On 2.4 GHz, Wi-Fi/BT coexistence time-shares the radio → BT mouse stalls and drops. Also **"Allow the computer to turn off this device to save power" is on** for the Intel Bluetooth adapter and the mouse's HID-over-GATT device (`MSPower_DeviceEnable` = True).
+  - Mouse's own connection request (`2A04`): interval 8.75 ms, slave latency 48, supervision timeout 3 s.
+  - **Fair A/B (12:39–12:41, back to back, 60 s each, same circles):**
+
+    | | App closed | App open |
+    |---|---|---|
+    | Reports / rate | 673, ~50 Hz | 2,241, ~70 Hz |
+    | Median gap | **17.2 ms** | 8.8 ms |
+    | p99 / max gap | 131.5 / 228.8 ms | 138.7 / 245.7 ms |
+    | Stalls > 120 ms | 7 (1.0 % of reports) | 27 (1.2 %) |
+    | Link drops | **2** (33.0 s, 53.8 s; back after ~1.7 s) | 0 |
+
+    **Verdict: the app is not the cause.** Stall rate per report is the same, and both drops happened with the app closed. The closed half also ran at half rate (17.2 ms, about every other 8.75 ms slot), which points at the radio/link, not the app. The power-saving checkbox was still on for both devices at the time (the user's change hadn't applied).
+  - Possible app-side mitigation, not built: `BluetoothLEDevice.RequestPreferredConnectionParameters(ThroughputOptimized())` (in `windows` 0.61; Windows 11). It asks Windows for a shorter connection interval while the request object is held. It may help the half-rate periods, but probably not coexistence stalls; measure with `ratespike` before keeping it.
+  - **Bug found in the log and fixed:** forgetting BT2 (12:20:04) blanked BT1's battery until BT1 reconnected. A re-watch stopped the battery reading, and BT1 (state unchanged) never restarted it. `watch_blocking` now stops it only if its owner left the list.
 - **Next (when work resumes):** finish B5's radio off/on + reboot checks, then **B6** (battery over Bluetooth: `DEVPKEY_Bluetooth_Battery` first, GATT `2A19` notifications as fallback; "—" while sleeping). B2–B5 code is not committed yet (only B0–B1 are, in "phase b1").
 
 ## Idea

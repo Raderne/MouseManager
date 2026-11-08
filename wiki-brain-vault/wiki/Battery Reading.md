@@ -2,7 +2,18 @@
 
 ~~**Status: open question.**~~ (superseded below)
 
-**Status (2026-11-08): solved over Bluetooth, built in the app (B6).** Over the receiver the battery is still unknown and the app shows "—". See [[Bluetooth Connection]] → B6.
+**Status (2026-11-08): solved over Bluetooth, built in the app (B6). Not readable over the receiver: the app shows "—" there.** See [[Bluetooth Connection]] → B6.
+
+## Receiver: closed (2026-11-08)
+
+Four independent checks, with Bluetooth reading **83–84 %** the same day:
+
+1. **Not declared.** Every receiver collection's button/value caps (scratch tool `hidspike caps`): mouse, consumer, system control, and the vendor usages `0xFF01` report 2 (7 bytes), `0xFFBC` report 4, `0xFF02` feature report 6 (7 bytes). No Battery System (`0x85`), Power Device (`0x84`) or Generic Device Controls battery-strength (`0x06`) usage anywhere.
+2. **Not pushed.** `hidspike listen` held read handles on the four non-mouse collections (`0xFF01`, `0x000C`, `0x0001/0x80`, `0xFFBC`) for 90 s and then 120 s, while the user switched the mouse to 2.4G, clicked, pressed the DPI button and **plugged in the USB-C charger**. **Zero reports arrived** on any of them.
+3. **Report 6 doesn't track it.** Byte 5 = `0x64` (100) in all 9 hourly readings over two days and before/after charging, while the real level was 83–84 %. Byte 4 went `EA` → `EB` → `EC` → `E9`: not a counter, not the battery. (`report6.log` history; the "N230 Battery History" scheduled task can be removed.)
+4. **Nothing to ask with.** No output reports exist ([[N230 Hardware]]).
+
+The only untried door is **writing** feature report 6 (`HidD_SetFeature`), which vendors sometimes use as a command channel. The protocol is unknown and there's no Lenovo software to learn it from; blind writes could change or brick settings. **Not pursued.**
 
 ## Bluetooth answers it (2026-11-07)
 
