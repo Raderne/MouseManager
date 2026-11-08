@@ -257,6 +257,15 @@ If 0a said no, remove the battery UI completely. Don't show a fake value.
 
 **Done when:** on X11 **and** Wayland, X1/X2 remapping, DPI scaling and the monitor work; a second mouse is unaffected; and killing the app with `kill -9` gives the normal mouse back right away.
 
+## Bluetooth phases (B0–B9)
+
+The N230 is also a **Bluetooth LE** mouse (VID/PID `25A7:FAA2`, two channels BT1/BT2). The plan is `../wiki-brain-vault/raw/bluetooth-phases-plan.md`; what was built and measured is the wiki's `Bluetooth Connection` page. Each B-phase has its own "Done when", like the phases here.
+
+- **Built and checked on Windows (2026-11-07/08):** B0 spike, B1 device identity (`device.rs`), B2 remap over BT (device arrival/removal, no stuck buttons), B3 search, B4 pair/forget, B5 link state, B6 battery (GATT Battery Service + notifications, low-battery notice), B7 Settings → Devices cards + "Add Bluetooth mouse" flow, B8 adapter hotplug/reset + radio access, B9 tests + this checklist.
+- **Open on Windows:** B5's reboot test; B8's installed-build (NSIS) and clean-account checks.
+- **Linux half of B2–B9:** waits for Phase 9 (BlueZ over D-Bus with `bluer`, `BUS_BLUETOOTH` matching, the Bluetooth udev lines).
+- Phase 8's "capture the Bluetooth IDs and add them to the default `devices`" is done (B0 + B1): the defaults hold the receiver and `25A7:FAA2` over Bluetooth.
+
 ## Phase 10: Package and release
 
 - **Windows:** `npm run tauri build` → NSIS installer. Unsigned builds get a SmartScreen warning on first run.
@@ -276,3 +285,15 @@ If 0a said no, remove the battery UI completely. Don't show a fake value.
 - [ ] A crash or forced kill leaves the mouse working normally
 - [ ] All 5 themes are readable, with no color flash on start
 - [ ] Start with the OS works after a reboot
+
+**Bluetooth (B9).** Each item notes where it already passed.
+
+- [ ] Search → Pair → remap works without opening the OS Bluetooth settings (Windows ✓ 2026-11-07, B4)
+- [ ] Sleep/wake, switching channel (receiver ↔ BT) and Bluetooth off/on keep the remap working, with no stuck button (Windows ✓ 2026-11-07/08, B2 + B5)
+- [ ] After a reboot the paired mouse reconnects by itself and is remapped (Windows: open, B5)
+- [ ] A second Bluetooth mouse is never remapped (Windows: open, needs a second BT mouse; covered by `cargo test` matching checks)
+- [ ] Battery shows a real % over Bluetooth and "—" when asleep, on the receiver or with Bluetooth off; never a guess (Windows ✓ 2026-11-08, B6)
+- [ ] Forget leaves nothing behind in the app or the OS list (Windows ✓ 2026-11-07, B4)
+- [ ] Two channels (BT1 + BT2) paired at once each keep their own card (Windows ✓ 2026-11-08, B7)
+- [ ] Adapter disabled/re-enabled or unplugged shows a message, then recovers without a restart (Windows: open, B8)
+- [ ] The installed app (not the dev build) can search, pair and read the battery without admin rights (Windows: open, B8)

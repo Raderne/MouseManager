@@ -219,11 +219,14 @@ pub fn scan(stop_after: Option<u64>) {
     }
 }
 
-/// `--watch <address> [seconds]`: print link-state and adapter changes for one paired mouse (B5).
-pub fn watch(address: String, seconds: u64) {
+/// `--watch <address[,address…]> [seconds]`: print link, adapter, battery and info events for paired
+/// mice, watched in the order given (B5–B9; e.g. BT2 then BT1 checks that one channel being off
+/// doesn't blank the other's battery).
+pub fn watch(addresses: String, seconds: u64) {
     let (tx, rx) = mpsc::channel();
     let bt = bt::start(tx);
-    bt.watch(&[address]);
+    let list: Vec<String> = addresses.split(',').map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).collect();
+    bt.watch(&list);
     let start = Instant::now();
     let end = start + Duration::from_secs(seconds);
     while let Some(left) = end.checked_duration_since(Instant::now()) {

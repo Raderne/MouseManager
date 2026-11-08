@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "tauri": "tauri",
-    "check": "node tests/dpi.mjs"
+    "check": "node tests/dpi.mjs && node tests/devices.mjs"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

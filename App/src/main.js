@@ -1,4 +1,5 @@
 import { Meter } from "./dpi.js";
+import { cardModels, cardState, batteryText } from "./devices.js";
 
 const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
@@ -401,12 +402,6 @@ const ADAPTER_TEXT = {
   denied: "Windows doesn't let this app use Bluetooth. Allow it in Settings → Privacy & security → Radios.",
 };
 
-const LINK_TEXT = {
-  connected: "Connected",
-  sleeping: "Asleep or off: move the mouse to wake it",
-  disconnected: "Not connected",
-};
-
 function make(tag, className, text) {
   const e = document.createElement(tag);
   if (className) e.className = className;
@@ -454,41 +449,10 @@ function confirmButton(label, armedLabel, onConfirm) {
   return b;
 }
 
-// --- Device cards ---------------------------------------------------------------------------
-
-/** One card per configured receiver / Bluetooth mouse paired from the app, plus mice Windows paired on its own. */
-function cardModels() {
-  const models = [];
-  const known = new Set();
-  for (const d of devices) {
-    if (d.bus === "usb") {
-      models.push({ kind: "usb", device: d });
-    } else if (d.bus === "bluetooth" && d.address) {
-      known.add(d.address.toUpperCase());
-      models.push({ kind: "bt", device: d, address: d.address, paired: pairedMice.find((m) => m.address === d.address) });
-    }
-  }
-  for (const m of pairedMice) {
-    if (!known.has(m.address.toUpperCase())) models.push({ kind: "bt-windows", address: m.address, paired: m });
-  }
-  return models;
-}
-
-function cardState(m) {
-  if (m.kind === "usb") {
-    if (activeBus === "usb") return { text: "In use", on: true };
-    if (usbPresent === false) return { text: "Unplugged" };
-    return { text: usbPresent ? "Plugged in" : "Receiver" };
-  }
-  const link = linkStates.get(m.address) ?? (m.paired?.connected ? "connected" : m.paired ? "disconnected" : "disconnected");
-  if (link !== "connected" && activeBus === "usb" && (m.paired?.n230 || m.device?.name?.includes("N230"))) {
-    return { text: "Not in use: the N230 is on the USB receiver", link };
-  }
-  return { text: LINK_TEXT[link] ?? link, on: link === "connected", link };
-}
+// --- Device cards (rules in devices.js, checked by npm run check) ----------------------------
 
 function renderCards() {
-  const list = cardModels();
+  const list = cardModels(devices, pairedMice);
   const box = $("device-cards");
   if (!list.length) {
     box.replaceChildren(make("li", "muted", "No devices yet. Add the N230 over Bluetooth, or plug in its receiver."));
@@ -499,7 +463,7 @@ function renderCards() {
       const li = make("li", "device-card");
       const name =
         m.device?.name || m.paired?.name || (m.kind === "usb" ? `USB device ${m.device.vid}:${m.device.pid}` : "Bluetooth mouse");
-      const state = cardState(m);
+      const state = cardState(m, linkStates, activeBus, usbPresent);
 
       const head = make("div", "card-head");
       const icon = make("span", "conn-icon", m.kind === "usb" ? "USB" : "BT");
@@ -515,10 +479,8 @@ function renderCards() {
       const dd = make("dd");
       dd.append(stateDd);
       facts.append(dd);
-      if (m.kind === "usb") {
-        fact("Battery", "— (not reported over the receiver)");
-      } else {
-        fact("Battery", state.link === "connected" && btBattery !== null && m.kind === "bt" ? `${btBattery}%` : "—");
+      fact("Battery", batteryText(m, state, btBattery));
+      if (m.kind !== "usb") {
         const info = btInfoByAddr.get(m.address);
         fact("Firmware", info?.firmware ?? "—");
         if (info?.manufacturer) fact("Made by", info.manufacturer);

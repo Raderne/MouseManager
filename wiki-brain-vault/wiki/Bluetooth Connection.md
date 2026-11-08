@@ -72,7 +72,13 @@ Full plan: `raw/bluetooth-phases-plan.md` (phases **B0–B9**, named so they don
   - **Adapter hotplug/reset:** a `DeviceWatcher` on `BluetoothAdapter::GetDeviceSelector()` (kept in `Inner.adapters`, started in `bt::start`). On Added/Removed (Updated needs a handler too or Windows raises neither) → after 500 ms: re-subscribe the radio (`subscribe_radio`, which drops the old subscription), send `btAdapter`, and `drop_all_links` if not on. Before this the radio was subscribed once, so a reset/swapped adapter went unheard. Verified: `btAdapter on` at startup from the enumeration's Added.
   - **Radio access:** `adapter_state` checks `Radio::RequestAccessAsync()`; not `Allowed` → new state **`denied`** with "Allow it in Settings → Privacy & security → Radios" and an "Open privacy settings" button. Desktop apps are normally allowed (it read allowed here).
   - `bt_open_settings(page)` takes `bluetooth` | `radios` and refuses anything else, so page text never reaches `explorer.exe`.
-  - Release NSIS installer build: pending.
+  - Release NSIS installer: `npm run tauri build -- --bundles nsis` → `target/release/bundle/nsis/N230 Control_0.1.0_x64-setup.exe` (1.6 MiB). Tauri's NSIS default is a per-user install (no admin). Rebuilt after the B9 fixes; the installed-app check is pending.
+- **2026-11-08, B9 (Windows):**
+  - **Card rules moved to `src/devices.js`** (pure: `cardModels`, `cardState`, `batteryText`) with **`tests/devices.mjs`**; `npm run check` now runs both JS checks. Moving it fixed a case-sensitive address match that could show one mouse as two cards.
+  - **Bug found and fixed: two paired channels blanked the battery.** With BT1 connected and BT2 off, the startup watch saw BT1 (start the battery read) then BT2 (`stop_battery`), and the stop cancelled BT1's read: header "—" while on Bluetooth. Now the reading has an owner (`battery_addr`); a mouse dropping stops it only if it owns it (`stop_battery(.., Some(addr))`); radio off / adapter gone / re-watch stop it regardless. The owner and generation are claimed in `report_link` **before** the battery thread starts, so a disconnect in between can't let a stale value through.
+  - `--watch` takes a comma-separated list, watched in order (e.g. BT2 then BT1, the order that broke).
+  - **`App/STEPS.md`** got a "Bluetooth phases (B0–B9)" section and 9 Bluetooth items in the Final checklist, each noting where it passed on Windows.
+  - Still open: the two-channel battery fix needs a live check (mouse on BT1 with BT2 paired); B5 reboot; B8 installed app + adapter disable/enable; a second-BT-mouse check; everything Linux.
 - **Next (when work resumes):** finish B5's radio off/on + reboot checks, then **B6** (battery over Bluetooth: `DEVPKEY_Bluetooth_Battery` first, GATT `2A19` notifications as fallback; "—" while sleeping). B2–B5 code is not committed yet (only B0–B1 are, in "phase b1").
 
 ## Idea

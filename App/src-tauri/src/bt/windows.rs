@@ -59,6 +59,8 @@ struct Inner {
     battery: Option<(GattCharacteristic, i64)>,
     /// Bumped on every battery start/stop, so a slow read that finishes after a disconnect is dropped.
     battery_gen: u64,
+    /// Which mouse the battery reading belongs to (BT1 and BT2 can both be paired).
+    battery_addr: Option<u64>,
     /// Last value sent, so `battery` goes out only on change. `None` = unknown ("—").
     battery_last: Option<u8>,
     /// Watches Bluetooth adapters arriving and leaving (B8).
@@ -258,8 +260,15 @@ fn report_link(dev: &BluetoothLEDevice, addr: u64, events: &Sender<Event>, inner
     if let Some(state) = state {
         let _ = events.send(link_event(addr, state));
         if state == LinkState::Connected {
+            // Claim the battery reading now, before the thread runs, so a disconnect in between stops it.
+            let mine = {
+                let mut g = inner.lock().unwrap();
+                g.battery_gen += 1;
+                g.battery_addr = Some(addr); // the last mouse to connect owns the battery reading
+                g.battery_gen
+            };
             let (d, ev, st) = (dev.clone(), events.clone(), inner.clone());
-            thread::spawn(move || start_battery(d, ev, st)); // GATT reads take a moment: not on the event thread
+            thread::spawn(move || start_battery(d, mine, ev, st)); // GATT reads take a moment: not on the event thread
             let (d, ev) = (dev.clone(), events.clone());
             thread::spawn(move || {
                 if let Some(info) = read_info(&d, addr) {
@@ -267,7 +276,7 @@ fn report_link(dev: &BluetoothLEDevice, addr: u64, events: &Sender<Event>, inner
                 }
             });
         } else {
-            stop_battery(inner, events); // asleep or off: "—", never the last number
+            stop_battery(inner, events, Some(addr)); // asleep or off: "—", never the last number
         }
     }
 }
@@ -303,10 +312,17 @@ fn set_battery(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>, percent: Optio
     }
 }
 
-fn stop_battery(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>) {
+/// `only`: stop only if the battery being read belongs to this mouse. With two channels paired
+/// (BT1 + BT2), the one that's off must not blank the battery of the one that's connected.
+/// `None`: stop whatever is being read (radio off, adapter gone, a new watch list).
+fn stop_battery(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>, only: Option<u64>) {
     let old = {
         let mut g = inner.lock().unwrap();
+        if only.is_some() && g.battery_addr != only {
+            return;
+        }
         g.battery_gen += 1;
+        g.battery_addr = None;
         g.battery.take()
     };
     if let Some((ch, token)) = old {
@@ -317,12 +333,8 @@ fn stop_battery(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>) {
 
 /// The standard Battery Service (B0: `180F`/`2A19`, Read + Notify; Windows lets apps use it on a HID
 /// mouse, only `1812` is blocked). Reads once, then subscribes so changes arrive without polling.
-fn start_battery(dev: BluetoothLEDevice, events: Sender<Event>, inner: Arc<Mutex<Inner>>) {
-    let mine = {
-        let mut g = inner.lock().unwrap();
-        g.battery_gen += 1;
-        g.battery_gen
-    };
+/// `mine`: the battery generation `report_link` claimed for this mouse; any later start/stop makes it stale.
+fn start_battery(dev: BluetoothLEDevice, mine: u64, events: Sender<Event>, inner: Arc<Mutex<Inner>>) {
     let current = |st: &Arc<Mutex<Inner>>| st.lock().unwrap().battery_gen == mine;
     let result = (|| -> Result<(), String> {
         let e = |e: windows::core::Error| e.message();
@@ -381,7 +393,13 @@ fn watch_blocking(addrs: Vec<u64>, events: Sender<Event>, inner: Arc<Mutex<Inner
     for (dev, token) in old {
         let _ = dev.RemoveConnectionStatusChanged(token);
     }
-    stop_battery(&inner, &events); // the connected mouse in the new list starts it again
+    // Stop the battery reading only if its mouse is no longer watched. A mouse that stays in the list
+    // keeps its link state, so it reports no change and would never restart the reading: forgetting BT2
+    // used to blank BT1's battery until BT1 next reconnected (seen 2026-11-08, 12:20:04).
+    let owner = inner.lock().unwrap().battery_addr;
+    if let Some(owner) = owner.filter(|a| !addrs.contains(a)) {
+        stop_battery(&inner, &events, Some(owner));
+    }
     inner.lock().unwrap().link_states.keep(&addrs);
 
     let mut links = Vec::new();
@@ -424,7 +442,7 @@ fn drop_all_links(inner: &Arc<Mutex<Inner>>, events: &Sender<Event>) {
             }
         }
     }
-    stop_battery(inner, events);
+    stop_battery(inner, events, None);
 }
 
 /// (Re)subscribes to the default adapter's radio (Bluetooth switched off/on). Called at the first
